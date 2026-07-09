@@ -3,6 +3,12 @@ import AppKit
 
 let mmToPointsRatio = 72.0 / 25.4
 
+/// Text-element content insets in mm, shared by the canvas, the inline
+/// editor, the sheet preview, AND the print/PDF renderer. All surfaces must
+/// use the same values or text wraps at different points on screen vs paper.
+let textElementInsetXMM = 1.0
+let textElementInsetYMM = 0.6
+
 func mmToPoints(_ millimeters: Double) -> CGFloat {
     CGFloat(millimeters * mmToPointsRatio)
 }
@@ -387,7 +393,7 @@ struct SerialSettings: Codable, Hashable {
     )
 }
 
-struct DataTable: Codable {
+struct DataTable: Codable, Equatable {
     var headers: [String]
     var rows: [[String: String]]
 }
@@ -399,6 +405,12 @@ struct PrintAutomationSettings: Codable, Hashable {
     var printerPassword: String
     var reconnectToPreviousWiFi: Bool
     var settleSeconds: Double
+    /// Wi-Fi to return to after printing when the pre-print network couldn't
+    /// be captured. macOS 15+ redacts the current SSID from every CLI without
+    /// Location Services, so on those systems this (or the auto-detected
+    /// preferred network) is the only way back. Optional: older documents
+    /// decode without it.
+    var restoreSSID: String?
 
     static let `default` = PrintAutomationSettings(
         enabled: false,
@@ -406,7 +418,8 @@ struct PrintAutomationSettings: Codable, Hashable {
         printerSSID: "",
         printerPassword: "",
         reconnectToPreviousWiFi: true,
-        settleSeconds: 2.0
+        settleSeconds: 2.0,
+        restoreSSID: nil
     )
 }
 
@@ -442,6 +455,36 @@ struct MergeContext {
     var isActive: Bool
 }
 
+/// RTF parsing is expensive and runs on every keystroke (`content.didSet`
+/// re-checks the stored RTF) and once per slot in the sheet preview, so
+/// identical payloads decode only once. Decoded values are immutable and
+/// shared; copy before mutating.
+enum RTFDecodeCache {
+    private static let cache = NSCache<NSData, NSAttributedString>()
+
+    static func decode(_ data: Data?) -> NSAttributedString? {
+        guard let data else { return nil }
+        let key = data as NSData
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        guard let decoded = try? NSAttributedString(
+            data: data,
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
+            documentAttributes: nil
+        ) else { return nil }
+        cache.setObject(decoded, forKey: key)
+        return decoded
+    }
+
+    /// Pre-populates the cache when the attributed source of an RTF payload
+    /// is already in hand (the inline editor encodes on every keystroke and
+    /// the same payload is re-read within the same event cycle).
+    static func seed(_ attributed: NSAttributedString, for data: Data) {
+        cache.setObject(NSAttributedString(attributedString: attributed), forKey: data as NSData)
+    }
+}
+
 struct LabelElement: Codable, Identifiable, Hashable {
     var id: UUID
     var type: ElementType
@@ -449,7 +492,19 @@ struct LabelElement: Codable, Identifiable, Hashable {
     var frame: RectMM
     var rotation: Double
     var opacity: Double
-    var content: String
+    var content: String {
+        didSet {
+            // The rich-text override is only valid while its plain string still
+            // matches `content`. When `content` is edited by any surface other
+            // than the inline editor (inspector "Content" box, token buttons,
+            // quick presets, paste), those writes only touch `content`; without
+            // this the stale RTF keeps shadowing the new text and the label
+            // never updates. Drop the stale RTF so the edit actually renders.
+            if richTextRTF != nil, LabelElement.plainText(fromRTF: richTextRTF) != content {
+                richTextRTF = nil
+            }
+        }
+    }
     var fontSize: Double
     var fontName: String
     var isBold: Bool
@@ -465,6 +520,65 @@ struct LabelElement: Codable, Identifiable, Hashable {
     var richTextRTF: Data?
     var imageData: Data?
     var imageScaleMode: ImageScaleMode
+
+    /// Decodes the plain string of an RTF payload, or nil if absent/undecodable.
+    /// Used to decide whether a stored `richTextRTF` still matches `content`.
+    static func plainText(fromRTF data: Data?) -> String? {
+        RTFDecodeCache.decode(data)?.string
+    }
+
+    /// Converts every font run in an RTF payload to the given family while
+    /// keeping each run's size and bold/italic traits. Used when the font is
+    /// changed element-wide so text with per-selection styling follows along.
+    static func rewritingFontFamily(of data: Data?, to family: String) -> Data? {
+        guard
+            let data,
+            let attributed = try? NSMutableAttributedString(
+                data: data,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+            )
+        else { return data }
+        // Enumerate an immutable copy: mutating the string being enumerated
+        // can re-visit ranges and apply the conversion twice.
+        let source = NSAttributedString(attributedString: attributed)
+        let fullRange = NSRange(location: 0, length: source.length)
+        source.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            let traits = NSFontManager.shared.traits(of: font)
+            let converted = resolvedNSFont(
+                name: family,
+                size: font.pointSize,
+                isBold: traits.contains(.boldFontMask),
+                isItalic: traits.contains(.italicFontMask)
+            )
+            attributed.addAttribute(.font, value: converted, range: range)
+        }
+        return attributed.rtf(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) ?? data
+    }
+
+    /// Multiplies every font run's size in an RTF payload by `factor`,
+    /// keeping families and traits. Used when the size is changed
+    /// element-wide so per-selection sizes keep their relative ratios.
+    static func scalingFontSizes(of data: Data?, by factor: Double) -> Data? {
+        guard factor > 0, abs(factor - 1) > 0.0001 else { return data }
+        guard let data, let decoded = RTFDecodeCache.decode(data) else { return data }
+        let mutable = NSMutableAttributedString(attributedString: decoded)
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        // Enumerate the immutable original, not `mutable`: mutating the
+        // string being enumerated can re-visit ranges and scale twice.
+        decoded.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            mutable.addAttribute(.font, value: font.withSize(max(0.5, font.pointSize * factor)), range: range)
+        }
+        return mutable.rtf(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) ?? data
+    }
 
     static func make(_ type: ElementType, index: Int) -> LabelElement {
         switch type {
@@ -597,7 +711,13 @@ struct LabelElement: Codable, Identifiable, Hashable {
     }
 }
 
-struct LabelDocument: Codable {
+struct EmbeddedFont: Codable, Hashable {
+    var postScriptName: String
+    var familyName: String
+    var data: Data
+}
+
+struct LabelDocument: Codable, Equatable {
     var title: String
     var sheet: SheetTemplate
     var elements: [LabelElement]
@@ -610,6 +730,10 @@ struct LabelDocument: Codable {
     var formatPDFTemplateURL: String?
     var printAutomation: PrintAutomationSettings
     var placement: PlacementSettings
+    /// Font files bundled into the project so custom (non-system) fonts render
+    /// identically on machines that don't have them installed. Populated at save
+    /// time, registered (process scope) at load time, then cleared from memory.
+    var embeddedFonts: [EmbeddedFont]? = nil
 
     var totalSlotCount: Int {
         max(1, sheet.columns * sheet.rows)

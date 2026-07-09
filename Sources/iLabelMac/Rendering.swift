@@ -94,12 +94,11 @@ enum TextLayoutRenderer {
         serialSettings: SerialSettings
     ) -> NSAttributedString {
         let base: NSMutableAttributedString
-        if let data = element.richTextRTF,
-           let attributed = try? NSMutableAttributedString(
-            data: data,
-            options: [.documentType: NSAttributedString.DocumentType.rtf],
-            documentAttributes: nil
-           ) {
+        if let attributed = RTFDecodeCache.decode(element.richTextRTF),
+           attributed.string == element.content {
+            // Only honor the rich-text override while it still matches `content`.
+            // Guards against older documents saved before content/RTF were kept
+            // in sync, so a diverged `content` edit still renders.
             base = normalizedRichText(attributed, for: element)
         } else {
             let paragraph = NSMutableParagraphStyle()
@@ -150,7 +149,7 @@ enum TextLayoutRenderer {
     }
 
     private static func normalizedRichText(
-        _ attributed: NSMutableAttributedString,
+        _ attributed: NSAttributedString,
         for element: LabelElement
     ) -> NSMutableAttributedString {
         let mutable = NSMutableAttributedString(attributedString: attributed)
@@ -158,15 +157,19 @@ enum TextLayoutRenderer {
         guard fullRange.length > 0 else { return mutable }
 
         mutable.beginEditing()
-        mutable.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
+        // Enumerate the immutable source, not `mutable` (mutating the string
+        // being enumerated can re-visit ranges).
+        attributed.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
             var updated = attributes
-            let fontSize = max(0.1, CGFloat(element.fontSize))
-            if let font = attributes[.font] as? NSFont {
-                updated[.font] = font.withSize(fontSize)
-            } else {
+            // Runs keep their own family AND size: both can differ per
+            // selection, and element-wide changes rewrite the RTF at edit
+            // time (rewritingFontFamily / scalingFontSizes), so the stored
+            // run font is authoritative. Only font-less runs fall back to
+            // the element-wide style.
+            if attributes[.font] == nil {
                 updated[.font] = PageRenderer.nsFont(
                     name: element.fontName,
-                    size: fontSize,
+                    size: max(0.1, CGFloat(element.fontSize)),
                     isBold: element.isBold,
                     isItalic: element.isItalic
                 )
@@ -190,6 +193,9 @@ enum TextLayoutRenderer {
 
 enum CodeImageProvider {
     static let ciContext = CIContext(options: nil)
+    // CIFilter generation + rasterization is far too slow to repeat for every
+    // preview slot on every refresh; payload+size pairs render once.
+    private static let imageCache = NSCache<NSString, NSImage>()
 
     static func makeImage(for element: LabelElement, context: MergeContext, serialSettings: SerialSettings, unitScale: CGFloat) -> NSImage? {
         let payload = MergeRenderer.resolve(element.content, context: context, serialSettings: serialSettings)
@@ -198,14 +204,24 @@ enum CodeImageProvider {
             height: max(64, element.frame.height * Double(max(unitScale, CGFloat(mmToPointsRatio))) * 6)
         )
 
+        let cacheKey = "\(element.type.rawValue)|\(Int(pixelSize.width))x\(Int(pixelSize.height))|\(payload)" as NSString
+        if let cached = imageCache.object(forKey: cacheKey) {
+            return cached
+        }
+
+        let image: NSImage?
         switch element.type {
         case .qrCode:
-            return qr(payload: payload, pixelSize: pixelSize)
+            image = qr(payload: payload, pixelSize: pixelSize)
         case .code128:
-            return code128(payload: payload, pixelSize: pixelSize)
+            image = code128(payload: payload, pixelSize: pixelSize)
         default:
-            return nil
+            image = nil
         }
+        if let image {
+            imageCache.setObject(image, forKey: cacheKey)
+        }
+        return image
     }
 
     private static func qr(payload: String, pixelSize: CGSize) -> NSImage? {
@@ -311,6 +327,26 @@ enum PageRenderer {
         return imageBackedPDFData(document: document, pageIndex: pageIndex) ?? Data()
     }
 
+    /// Renders every page of the document into a single multi-page PDF by
+    /// merging each page's single-page PDF with PDFKit.
+    static func pdfDataAllPages(document: LabelDocument) -> Data {
+        let pageCount = max(1, document.pageCount)
+        let combined = PDFDocument()
+        for pageIndex in 0..<pageCount {
+            let data = pdfData(document: document, pageIndex: pageIndex)
+            guard let page = PDFDocument(data: data), page.pageCount > 0 else { continue }
+            for i in 0..<page.pageCount {
+                if let pdfPage = page.page(at: i) {
+                    combined.insert(pdfPage, at: combined.pageCount)
+                }
+            }
+        }
+        if combined.pageCount == 0 {
+            return pdfData(document: document, pageIndex: 0)
+        }
+        return combined.dataRepresentation() ?? pdfData(document: document, pageIndex: 0)
+    }
+
     static func pngData(document: LabelDocument, pageIndex: Int) -> Data? {
         guard let image = renderedImage(document: document, pageIndex: pageIndex) else {
             return nil
@@ -321,7 +357,8 @@ enum PageRenderer {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    static func print(document: LabelDocument, pageIndex: Int) {
+    @discardableResult
+    static func print(document: LabelDocument, pageIndex: Int) -> Bool {
         let printSize = pageSize(document: document)
         let info = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo.shared
         info.topMargin = 0
@@ -343,8 +380,7 @@ enum PageRenderer {
             operation.jobTitle = document.title
             operation.showsPrintPanel = true
             operation.showsProgressPanel = true
-            _ = operation.run()
-            return
+            return operation.run()
         }
 
         let fallbackView: NSView
@@ -357,7 +393,7 @@ enum PageRenderer {
         let operation = NSPrintOperation(view: fallbackView, printInfo: info)
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
-        operation.run()
+        return operation.run()
     }
 
     static func directPDFData(document: LabelDocument, pageIndex: Int) -> Data? {
@@ -543,7 +579,9 @@ enum PageRenderer {
         serialSettings: SerialSettings
     ) {
         let attributed = TextLayoutRenderer.attributedString(for: element, context: mergeContext, serialSettings: serialSettings)
-        let insetRect = rect.insetBy(dx: mmToPoints(0.2), dy: mmToPoints(0.2))
+        // Same mm insets as the on-screen surfaces (textElementInset*MM) so
+        // line wrapping happens at the same characters in print as on screen.
+        let insetRect = rect.insetBy(dx: mmToPoints(textElementInsetXMM), dy: mmToPoints(textElementInsetYMM))
         let textSize = attributed.boundingRect(
             with: insetRect.size,
             options: [.usesLineFragmentOrigin, .usesFontLeading]

@@ -13,6 +13,8 @@ enum UIFormatters {
     static let integer: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .none
+        formatter.allowsFloats = false
+        formatter.usesGroupingSeparator = false
         return formatter
     }()
 }
@@ -57,6 +59,25 @@ func resolvedNSFont(name: String, size: CGFloat, isBold: Bool, isItalic: Bool = 
         return family
     }
     return .systemFont(ofSize: size, weight: isBold ? .bold : .regular)
+}
+
+/// Font family enumeration hits the font subsystem and the inspector body
+/// runs on every keystroke, so both lists are computed once. Installed fonts
+/// changing mid-session is rare enough to ignore.
+let installedFontFamilies: [String] = NSFontManager.shared.availableFontFamilies.sorted()
+private let installedFontFamilyLookup: Set<String> = Set(installedFontFamilies.map { $0.lowercased() })
+
+/// True when `name` resolves to a real installed font (family or PostScript
+/// name) rather than silently falling back to the system font. Used to warn
+/// when a project made on another Mac references a font not installed here,
+/// which shifts text size/position.
+func fontFamilyIsAvailable(_ name: String) -> Bool {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+    if installedFontFamilyLookup.contains(trimmed.lowercased()) {
+        return true
+    }
+    return NSFont(name: trimmed, size: 12) != nil
 }
 
 func adaptiveColor(light: NSColor, dark: NSColor) -> Color {
@@ -138,8 +159,32 @@ struct ToolbarStrip: View {
             ToolbarSeparator()
 
             ControlGroup {
+                Button {
+                    store.undo()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .disabled(!store.canUndo)
+                .help("Undo (⌘Z)")
+
+                Button {
+                    store.redo()
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                }
+                .disabled(!store.canRedo)
+                .help("Redo (⇧⌘Z)")
+            }
+
+            ToolbarSeparator()
+
+            ControlGroup {
                 Button("CSV", action: store.importCSV)
                 Button("PDF", action: store.exportPDF)
+                    .help("Export the current page as PDF")
+                Button("PDF·All", action: store.exportAllPagesPDF)
+                    .help("Export every page into one multi-page PDF")
+                    .disabled(store.document.pageCount <= 1)
                 Button("PNG", action: store.exportPNG)
                 Button("Print", action: store.printCurrentPage)
             }
@@ -198,6 +243,21 @@ struct ToolbarStrip: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+        }
+        .background {
+            // Invisible shortcut carriers. Disabled while inline-editing text so
+            // the NSTextView keeps its own ⌘Z for character-level undo.
+            Group {
+                Button("Undo", action: store.undo)
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!store.canUndo || store.editingElementID != nil)
+                Button("Redo", action: store.redo)
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!store.canRedo || store.editingElementID != nil)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -275,56 +335,15 @@ struct SidebarView: View {
                     }
                 }
 
-                GroupBox("Official Formats") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("Search code or size", text: $store.formatSearchText)
-
-                        Picker("Family", selection: $store.selectedFamilyFilter) {
-                            Text("All Families").tag(Optional<ProductFamily>.none)
-                            ForEach(ProductFamily.allCases) { family in
-                                Text(family.label).tag(Optional(family))
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        Text("\(store.filteredFormats.count) matches / \(store.officialFormats.count) official formats")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(Array(store.filteredFormats.prefix(180))) { format in
-                                    Button {
-                                        store.applyOfficialFormat(code: format.code)
-                                    } label: {
-                                        HStack(alignment: .top, spacing: 8) {
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(format.code)
-                                                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                                                Text(format.sizeSummary)
-                                                    .font(.system(size: 11))
-                                                    .foregroundStyle(.secondary)
-                                                Text(format.detailSummary)
-                                                    .font(.system(size: 10))
-                                                    .foregroundStyle(.secondary)
-                                            }
-
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                                .fill(store.document.formatCode == format.code ? Color.accentColor.opacity(0.16) : appCardBackground())
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .frame(minHeight: 240, maxHeight: 320)
-                    }
-                }
+                OfficialFormatsSection(
+                    searchText: $store.formatSearchText,
+                    familyFilter: $store.selectedFamilyFilter,
+                    filteredFormats: store.filteredFormats,
+                    totalCount: store.officialFormats.count,
+                    selectedCode: store.document.formatCode,
+                    onApply: { store.applyOfficialFormat(code: $0) }
+                )
+                .equatable()
 
                 GroupBox("Sheet") {
                     VStack(alignment: .leading, spacing: 10) {
@@ -539,7 +558,7 @@ struct InspectorView: View {
     @ObservedObject var store: DocumentStore
 
     private var availableFontFamilies: [String] {
-        NSFontManager.shared.availableFontFamilies.sorted()
+        installedFontFamilies
     }
 
     var body: some View {
@@ -643,7 +662,13 @@ struct InspectorView: View {
                                     Text("Size")
                                         .font(.system(size: 12))
                                         .frame(width: 32, alignment: .leading)
-                                    TextField("Size", value: selectedBinding(\.fontSize, defaultValue: 12), formatter: UIFormatters.decimal)
+                                    // Editing + selection → resizes just the
+                                    // selection; otherwise the whole element.
+                                    CommitNumberField(
+                                        title: "Size",
+                                        value: store.selectedElement?.fontSize ?? 12,
+                                        onCommit: { store.applyTextStyleAction(.fontSize($0)) }
+                                    )
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 64)
                                     Text("pt")
@@ -654,14 +679,18 @@ struct InspectorView: View {
 
                                     Text("Font")
                                         .font(.system(size: 12))
-                                    Picker("Font", selection: selectedBinding(\.fontName, defaultValue: "Arial")) {
-                                        ForEach(availableFontFamilies, id: \.self) { family in
-                                            Text(family).tag(family)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .pickerStyle(.menu)
-                                    .frame(width: 118)
+                                    FontFamilyPicker(
+                                        fontName: selected.fontName,
+                                        onSelect: { store.applyTextStyleAction(.fontFamily($0)) }
+                                    )
+                                    .equatable()
+                                }
+
+                                if !fontFamilyIsAvailable(selected.fontName) {
+                                    Label("‘\(selected.fontName)’ isn't installed on this Mac — text falls back to the system font, so its size and position may differ from the original.", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
 
                                 HStack(alignment: .center, spacing: 10) {
@@ -787,6 +816,21 @@ struct InspectorView: View {
 
                         Toggle("Return to previous Wi-Fi", isOn: printBinding(\.reconnectToPreviousWiFi))
                             .disabled(!store.document.printAutomation.enabled)
+
+                        // macOS 15+ hides the current SSID from apps, so the
+                        // pre-print network often can't be captured; this names
+                        // the network to fall back to. Empty → the top
+                        // non-printer preferred network is used.
+                        TextField("Restore SSID (empty = auto)", text: Binding(
+                            get: { store.document.printAutomation.restoreSSID ?? "" },
+                            set: { newValue in
+                                store.updateDocument { document in
+                                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    document.printAutomation.restoreSSID = trimmed.isEmpty ? nil : trimmed
+                                }
+                            }
+                        ))
+                        .disabled(!store.document.printAutomation.enabled || !store.document.printAutomation.reconnectToPreviousWiFi)
 
                         NumberRow(title: "Settle sec", value: printDoubleBinding(\.settleSeconds), suffix: "sec")
                             .opacity(store.document.printAutomation.enabled ? 1 : 0.5)
@@ -940,6 +984,150 @@ struct InspectorView: View {
     }
 }
 
+/// The catalog list is ~180 visible rows out of 1,006 formats and the sidebar
+/// body runs on every keystroke; behind .equatable() the list only rebuilds
+/// when the search, family filter, or selected format actually changes.
+struct OfficialFormatsSection: View, Equatable {
+    @Binding var searchText: String
+    @Binding var familyFilter: ProductFamily?
+    let filteredFormats: [OfficialFormatDefinition]
+    let totalCount: Int
+    let selectedCode: String?
+    let onApply: (String) -> Void
+
+    static func == (lhs: OfficialFormatsSection, rhs: OfficialFormatsSection) -> Bool {
+        lhs.searchText == rhs.searchText
+            && lhs.familyFilter == rhs.familyFilter
+            && lhs.selectedCode == rhs.selectedCode
+    }
+
+    var body: some View {
+        GroupBox("Official Formats") {
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Search code or size", text: $searchText)
+
+                Picker("Family", selection: $familyFilter) {
+                    Text("All Families").tag(Optional<ProductFamily>.none)
+                    ForEach(ProductFamily.allCases) { family in
+                        Text(family.label).tag(Optional(family))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text("\(filteredFormats.count) matches / \(totalCount) official formats")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(filteredFormats.prefix(180))) { format in
+                            Button {
+                                onApply(format.code)
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(format.code)
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                        Text(format.sizeSummary)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                        Text(format.detailSummary)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(selectedCode == format.code ? Color.accentColor.opacity(0.16) : appCardBackground())
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(minHeight: 240, maxHeight: 320)
+            }
+        }
+    }
+}
+
+/// The full font menu holds hundreds of families and the inspector body runs
+/// on every keystroke; behind .equatable() the 300-item picker is only
+/// rebuilt when the selected element's font actually changes.
+struct FontFamilyPicker: View, Equatable {
+    let fontName: String
+    let onSelect: (String) -> Void
+
+    static func == (lhs: FontFamilyPicker, rhs: FontFamilyPicker) -> Bool {
+        lhs.fontName == rhs.fontName
+    }
+
+    var body: some View {
+        // While the inline editor is open a selection applies to the dragged
+        // range only (like B/I/U); otherwise it restyles the whole element.
+        Picker("Font", selection: Binding(get: { fontName }, set: onSelect)) {
+            // Keep the element's own font selectable/visible even when it
+            // isn't installed on this Mac (e.g. a project from another
+            // machine), so the intended font name isn't silently lost.
+            if !installedFontFamilies.contains(where: { $0.caseInsensitiveCompare(fontName) == .orderedSame }) {
+                Text(fontFamilyIsAvailable(fontName) ? fontName : "\(fontName) (missing)")
+                    .tag(fontName)
+            }
+            ForEach(installedFontFamilies, id: \.self) { family in
+                Text(family).tag(family)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(width: 118)
+    }
+}
+
+/// Numeric field that fires `onCommit` only on Enter or focus loss. A
+/// formatter-bound `TextField(value:)` can push partially typed numbers
+/// through the binding (typing "24" commits 2 then 24), which for font size
+/// means an RTF rewrite and full re-render per digit — visible lag and a
+/// lossy intermediate scale.
+struct CommitNumberField: View {
+    let title: String
+    let value: Double
+    let onCommit: (Double) -> Void
+
+    @State private var text = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField(title, text: $text)
+            .focused($isFocused)
+            .onAppear { text = Self.format(value) }
+            .onChange(of: value) { _, newValue in
+                if !isFocused { text = Self.format(newValue) }
+            }
+            .onChange(of: isFocused) { _, focused in
+                if !focused { commit() }
+            }
+            .onSubmit { commit() }
+    }
+
+    private func commit() {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+        guard let parsed = Double(normalized), parsed > 0.1, abs(parsed - value) > 0.0001 else {
+            text = Self.format(value)
+            return
+        }
+        onCommit(parsed)
+        text = Self.format(parsed)
+    }
+
+    private static func format(_ value: Double) -> String {
+        value == floor(value) ? String(Int(value)) : String(format: "%.1f", value)
+    }
+}
+
 struct SingleLabelCanvas: View {
     @ObservedObject var store: DocumentStore
 
@@ -978,8 +1166,9 @@ struct SingleLabelCanvas: View {
                     ForEach(store.document.elements) { element in
                         EditableElementView(
                             element: element,
-                            text: elementContentBinding(for: element.id),
-                            richTextData: elementRichTextBinding(for: element.id),
+                            onTextChange: { content, rtf in
+                                store.updateTextElement(id: element.id, content: content, richTextRTF: rtf)
+                            },
                             isSelected: store.selectedElementID == element.id,
                             isEditing: store.editingElementID == element.id,
                             context: context,
@@ -1005,27 +1194,6 @@ struct SingleLabelCanvas: View {
         }
     }
 
-    private func elementContentBinding(for id: UUID) -> Binding<String> {
-        Binding(
-            get: { store.document.elements.first(where: { $0.id == id })?.content ?? "" },
-            set: { newValue in
-                store.updateElement(id: id) { element in
-                    element.content = newValue
-                }
-            }
-        )
-    }
-
-    private func elementRichTextBinding(for id: UUID) -> Binding<Data?> {
-        Binding(
-            get: { store.document.elements.first(where: { $0.id == id })?.richTextRTF },
-            set: { newValue in
-                store.updateElement(id: id) { element in
-                    element.richTextRTF = newValue
-                }
-            }
-        )
-    }
 }
 
 struct CircleAlignmentGuides: View {
@@ -1050,8 +1218,7 @@ struct CircleAlignmentGuides: View {
 
 struct EditableElementView: View {
     let element: LabelElement
-    @Binding var text: String
-    @Binding var richTextData: Data?
+    let onTextChange: (String, Data?) -> Void
     let isSelected: Bool
     let isEditing: Bool
     let context: MergeContext
@@ -1090,8 +1257,7 @@ struct EditableElementView: View {
             if isEditing && element.type == .text {
                 InlineEditableTextField(
                     element: element,
-                    text: $text,
-                    richTextData: $richTextData,
+                    onTextChange: onTextChange,
                     context: context,
                     serialSettings: serialSettings,
                     unitScale: unitScale,
@@ -1133,8 +1299,7 @@ struct EditableElementView: View {
 
 struct InlineEditableTextField: View {
     let element: LabelElement
-    @Binding var text: String
-    @Binding var richTextData: Data?
+    let onTextChange: (String, Data?) -> Void
     let context: MergeContext
     let serialSettings: SerialSettings
     let unitScale: CGFloat
@@ -1146,8 +1311,9 @@ struct InlineEditableTextField: View {
                 .fill(element.background.color.opacity(max(element.background.alpha, 0.001)))
 
             AppKitInlineTextField(
-                text: $text,
-                richTextData: $richTextData,
+                text: element.content,
+                richTextData: element.richTextRTF,
+                onTextChange: onTextChange,
                 fontName: element.fontName,
                 fontSize: max(4, pointsToDisplay(element.fontSize, unitScale: unitScale)),
                 storageFontSize: CGFloat(element.fontSize),
@@ -1157,14 +1323,14 @@ struct InlineEditableTextField: View {
                 alignment: element.textAlignment,
                 foreground: element.foreground.nsColor,
                 caretColor: element.foreground.nsColor,
-                placeCursorAtStart: text.hasPrefix("{{serial}}"),
+                placeCursorAtStart: element.content.hasPrefix("{{serial}}"),
                 onCommit: {
                     onCommit()
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: element.textAlignment.alignment)
-            .padding(.horizontal, CGFloat(1.0) * unitScale)
-            .padding(.vertical, CGFloat(0.6) * unitScale)
+            .padding(.horizontal, CGFloat(textElementInsetXMM) * unitScale)
+            .padding(.vertical, CGFloat(textElementInsetYMM) * unitScale)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1174,8 +1340,12 @@ struct InlineEditableTextField: View {
 }
 
 struct AppKitInlineTextField: NSViewRepresentable {
-    @Binding var text: String
-    @Binding var richTextData: Data?
+    let text: String
+    let richTextData: Data?
+    // Single callback instead of separate text/RTF bindings so both land in
+    // one store update; split writes briefly published content with stale or
+    // missing RTF, which is what made edits flicker or drop styling.
+    let onTextChange: (String, Data?) -> Void
     let fontName: String
     let fontSize: CGFloat
     let storageFontSize: CGFloat
@@ -1246,10 +1416,30 @@ struct AppKitInlineTextField: NSViewRepresentable {
         return scrollView
     }
 
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        // Editing can end by the editor view being swapped out (tap outside,
+        // finishInlineEditing) without a textDidEndEditing — flush any text
+        // the trailing sync hasn't pushed yet or the last keystrokes vanish.
+        coordinator.flushPendingSync()
+    }
+
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
         context.coordinator.textView = textView
         context.coordinator.parent = self
+
+        // Completely no-op when this update just echoes what the editor
+        // itself produced (every keystroke round-trips through the store).
+        // Touching typingAttributes/layout here invalidates the
+        // NSTextInputContext, and the input method (Korean IME) then
+        // re-syncs its session over XPC on every keystroke — profiled at
+        // ~35ms per key, the typing lag.
+        if context.coordinator.lastAppliedRichTextData == richTextData,
+           context.coordinator.lastAppliedStyle == styleSignature(),
+           textView.string == text {
+            return
+        }
+
         applyInitialContent(to: textView, coordinator: context.coordinator)
         DispatchQueue.main.async {
             self.centerVertically(textView)
@@ -1257,17 +1447,21 @@ struct AppKitInlineTextField: NSViewRepresentable {
     }
 
     private func applyInitialContent(to textView: NSTextView, coordinator: Coordinator) {
+        // Never rewrite the storage while an IME composition (e.g. Korean
+        // Hangul) is in flight — a programmatic replacement here cancels the
+        // marked text, so composed characters vanish or commit half-typed.
+        if textView.hasMarkedText() {
+            applyEditorConfiguration(to: textView)
+            return
+        }
+
         let currentStyle = styleSignature()
         let selection = textView.selectedRange()
         var replacedContent = false
 
-        if let richTextData,
-           let attributed = try? NSAttributedString(
-            data: richTextData,
-            options: [.documentType: NSAttributedString.DocumentType.rtf],
-            documentAttributes: nil
-           ) {
-            let storageAttributed = attributedString(attributed, withFontSize: storageFontSize)
+        if let attributed = RTFDecodeCache.decode(richTextData),
+           attributed.string == text {
+            let storageAttributed = normalizedStorageAttributedString(attributed)
             let displayAttributed = scaledAttributedString(storageAttributed, from: storageFontSize, to: fontSize)
             if coordinator.lastAppliedRichTextData != richTextData ||
                 coordinator.lastAppliedStyle != currentStyle ||
@@ -1330,11 +1524,12 @@ struct AppKitInlineTextField: NSViewRepresentable {
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let availableHeight = textView.bounds.height
-        let isMultiline = textView.string.contains("\n")
-        let verticalInset = isMultiline
-            ? max(0, floor((availableHeight - usedRect.height) / 2))
-            : max(0, floor((availableHeight - usedRect.height) / 2))
-        textView.textContainerInset = NSSize(width: 0, height: verticalInset)
+        let verticalInset = max(0, floor((availableHeight - usedRect.height) / 2))
+        // Re-assigning the same inset still invalidates layout (and pokes the
+        // input context), so skip unless the centering actually moved.
+        if abs(textView.textContainerInset.height - verticalInset) > 0.5 {
+            textView.textContainerInset = NSSize(width: 0, height: verticalInset)
+        }
     }
 
     private func resolvedFont() -> NSFont {
@@ -1375,10 +1570,14 @@ struct AppKitInlineTextField: NSViewRepresentable {
     private func storageRTFData(from textView: NSTextView) -> Data? {
         guard let textStorage = textView.textStorage else { return nil }
         let storageAttributed = scaledAttributedString(textStorage, from: fontSize, to: storageFontSize)
-        return storageAttributed.rtf(
+        guard let data = storageAttributed.rtf(
             from: NSRange(location: 0, length: storageAttributed.length),
             documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-        )
+        ) else { return nil }
+        // This payload is re-read on the same keystroke (content.didSet, the
+        // preview slots, updateNSView); seeding skips those full RTF parses.
+        RTFDecodeCache.seed(storageAttributed, for: data)
+        return data
     }
 
     private func scaledAttributedString(_ attributed: NSAttributedString, from sourceSize: CGFloat, to targetSize: CGFloat) -> NSAttributedString {
@@ -1386,22 +1585,38 @@ struct AppKitInlineTextField: NSViewRepresentable {
         let target = max(targetSize, 0.1)
         let scale = target / source
         let mutable = NSMutableAttributedString(attributedString: attributed)
-        mutable.enumerateAttribute(.font, in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
+        // Enumerate the source, not `mutable`: mutating the string being
+        // enumerated can re-visit ranges and scale twice.
+        attributed.enumerateAttribute(.font, in: NSRange(location: 0, length: attributed.length), options: []) { value, range, _ in
             guard let font = value as? NSFont else { return }
             mutable.addAttribute(.font, value: font.withSize(max(0.1, font.pointSize * scale)), range: range)
         }
         return mutable
     }
 
-    private func attributedString(_ attributed: NSAttributedString, withFontSize targetSize: CGFloat) -> NSAttributedString {
+    /// Re-derives run attributes from the element-wide style: color and
+    /// alignment come from the inspector, so they override every run;
+    /// per-run font (family + size) and bold/italic/underline (selection
+    /// styling) survive. Keeping the runs' own color meant inspector changes
+    /// applied only to newly typed characters, never to the existing text.
+    private func normalizedStorageAttributedString(_ attributed: NSAttributedString) -> NSAttributedString {
         let mutable = NSMutableAttributedString(attributedString: attributed)
-        let range = NSRange(location: 0, length: mutable.length)
-        mutable.enumerateAttribute(.font, in: range, options: []) { value, range, _ in
-            guard let font = value as? NSFont else {
-                mutable.addAttribute(.font, value: resolvedFont().withSize(targetSize), range: range)
-                return
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment.nsTextAlignment
+        mutable.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
+            var updated = attributes
+            // Run fonts (family AND size) are per-selection styling and stay
+            // untouched; only font-less runs fall back to the element style.
+            if attributes[.font] == nil {
+                updated[.font] = resolvedNSFont(name: fontName, size: max(0.1, storageFontSize), isBold: isBold, isItalic: isItalic)
             }
-            mutable.addAttribute(.font, value: font.withSize(max(0.1, targetSize)), range: range)
+            updated[.foregroundColor] = foreground
+            updated[.paragraphStyle] = paragraph
+            if updated[.underlineStyle] == nil {
+                updated[.underlineStyle] = isUnderline ? NSUnderlineStyle.single.rawValue : 0
+            }
+            mutable.setAttributes(updated, range: range)
         }
         return mutable
     }
@@ -1414,6 +1629,7 @@ struct AppKitInlineTextField: NSViewRepresentable {
         var lastSelectedRange = NSRange(location: 0, length: 0)
         var lastAppliedRichTextData: Data?
         var lastAppliedStyle: EditorStyleSignature?
+        var pendingSyncWorkItem: DispatchWorkItem?
 
         init(parent: AppKitInlineTextField) {
             self.parent = parent
@@ -1445,10 +1661,10 @@ struct AppKitInlineTextField: NSViewRepresentable {
             ) { [weak self] notification in
                 guard
                     let self,
-                    let action = notification.object as? TextStyleAction,
+                    let request = notification.object as? TextStyleActionRequest,
                     let textView = self.textView
                 else { return }
-                self.applyStyle(action, to: textView)
+                self.applyStyle(request, to: textView)
             }
         }
 
@@ -1463,12 +1679,35 @@ struct AppKitInlineTextField: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            syncBindings(from: textView)
             parent.centerVertically(textView)
+            // Don't push to the store on every keystroke: the editor owns the
+            // text while it's open, and each push costs an RTF encode plus a
+            // whole-window SwiftUI diff — and stretches the Korean IME's
+            // per-key XPC round trip. A short trailing sync keeps the rest of
+            // the app close behind; every exit path flushes synchronously.
+            scheduleSync(from: textView)
         }
 
         func textDidEndEditing(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            syncBindings(from: textView)
+        }
+
+        private func scheduleSync(from textView: NSTextView) {
+            pendingSyncWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                self.pendingSyncWorkItem = nil
+                self.syncBindings(from: textView)
+            }
+            pendingSyncWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
+        }
+
+        func flushPendingSync() {
+            guard pendingSyncWorkItem != nil, let textView else { return }
+            pendingSyncWorkItem?.cancel()
+            pendingSyncWorkItem = nil
             syncBindings(from: textView)
         }
 
@@ -1480,11 +1719,26 @@ struct AppKitInlineTextField: NSViewRepresentable {
             }
         }
 
-        private func applyStyle(_ action: TextStyleAction, to textView: NSTextView) {
+        private func applyStyle(_ request: TextStyleActionRequest, to textView: NSTextView) {
+            let action = request.action
             guard let textStorage = textView.textStorage else { return }
             let selection = textView.selectedRange()
+            let hasExplicitSelection = selection.length > 0 || lastSelectedRange.length > 0
+
+            // Font family/size without a dragged selection means "the whole
+            // element" — decline so the store applies it element-wide, which
+            // also keeps element.fontName/fontSize (and the inspector fields)
+            // in sync. B/I/U keep their old apply-to-all behavior here.
+            switch action {
+            case .fontFamily, .fontSize:
+                guard hasExplicitSelection else { return }
+            case .bold, .italic, .underline:
+                break
+            }
+
             let targetRange = selection.length > 0 ? selection : (lastSelectedRange.length > 0 ? lastSelectedRange : NSRange(location: 0, length: textStorage.length))
             guard targetRange.length > 0 else { return }
+            request.handled = true
 
             textStorage.beginEditing()
             textStorage.enumerateAttributes(in: targetRange, options: []) { attributes, range, _ in
@@ -1500,6 +1754,21 @@ struct AppKitInlineTextField: NSViewRepresentable {
                 case .underline:
                     let current = (attributes[.underlineStyle] as? Int) ?? 0
                     updatedAttributes[.underlineStyle] = current == 0 ? NSUnderlineStyle.single.rawValue : 0
+                case .fontFamily(let name):
+                    let currentFont = (attributes[.font] as? NSFont) ?? resolvedNSFont(name: self.parent.fontName, size: self.parent.fontSize, isBold: self.parent.isBold, isItalic: self.parent.isItalic)
+                    let traits = NSFontManager.shared.traits(of: currentFont)
+                    updatedAttributes[.font] = resolvedNSFont(
+                        name: name,
+                        size: currentFont.pointSize,
+                        isBold: traits.contains(.boldFontMask),
+                        isItalic: traits.contains(.italicFontMask)
+                    )
+                case .fontSize(let storagePoints):
+                    // The editor works in display points; convert the storage
+                    // size using the element's own storage→display ratio.
+                    let displayScale = self.parent.fontSize / max(self.parent.storageFontSize, 0.1)
+                    let currentFont = (attributes[.font] as? NSFont) ?? resolvedNSFont(name: self.parent.fontName, size: self.parent.fontSize, isBold: self.parent.isBold, isItalic: self.parent.isItalic)
+                    updatedAttributes[.font] = currentFont.withSize(max(0.5, CGFloat(storagePoints) * displayScale))
                 }
                 textStorage.setAttributes(updatedAttributes, range: range)
             }
@@ -1511,9 +1780,12 @@ struct AppKitInlineTextField: NSViewRepresentable {
         }
 
         func syncBindings(from textView: NSTextView) {
-            parent.text = textView.string
+            // A direct sync (style action, preset insert, end editing)
+            // supersedes any pending throttled one.
+            pendingSyncWorkItem?.cancel()
+            pendingSyncWorkItem = nil
             let rtf = parent.storageRTFData(from: textView)
-            parent.richTextData = rtf
+            parent.onTextChange(textView.string, rtf)
             captureState(from: textView, richTextData: rtf, style: parent.styleSignature())
         }
 
@@ -1528,16 +1800,49 @@ struct LivePagePreviewPanel: View {
     @ObservedObject var store: DocumentStore
 
     var body: some View {
-        let activePrintSlots = Set(store.previewDocument.visiblePreviewSlotIndices(pageIndex: store.currentPageIndex))
-        let selectedSlots = Set(store.document.activeSlotIndices)
-        let printListEntries = makePrintListEntries(document: store.previewDocument, pageIndex: store.currentPageIndex, slots: store.previewDocument.visiblePreviewSlotIndices(pageIndex: store.currentPageIndex))
+        // The heavy sheet render lives behind .equatable(): the store
+        // publishes on every keystroke, but the full-slot grid only needs to
+        // re-render when the throttled previewDocument (or the selection)
+        // actually changes.
+        LivePagePreviewBody(
+            document: store.previewDocument,
+            pageIndex: store.currentPageIndex,
+            selectedSlots: Set(store.document.activeSlotIndices),
+            pageCount: store.document.pageCount,
+            onTapSlot: { store.selectPlacementStart(at: $0) },
+            onDragSlots: { store.selectPlacementRect(from: $0, to: $1) },
+            onResetArea: { store.clearPlacementSelection() }
+        )
+        .equatable()
+    }
+}
+
+struct LivePagePreviewBody: View, Equatable {
+    let document: LabelDocument
+    let pageIndex: Int
+    let selectedSlots: Set<Int>
+    let pageCount: Int
+    let onTapSlot: (Int) -> Void
+    let onDragSlots: (Int, Int) -> Void
+    let onResetArea: () -> Void
+
+    static func == (lhs: LivePagePreviewBody, rhs: LivePagePreviewBody) -> Bool {
+        lhs.document == rhs.document
+            && lhs.pageIndex == rhs.pageIndex
+            && lhs.selectedSlots == rhs.selectedSlots
+            && lhs.pageCount == rhs.pageCount
+    }
+
+    var body: some View {
+        let activePrintSlots = Set(document.visiblePreviewSlotIndices(pageIndex: pageIndex))
+        let printListEntries = makePrintListEntries(document: document, pageIndex: pageIndex, slots: document.visiblePreviewSlotIndices(pageIndex: pageIndex))
 
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Print Preview")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text("Page \(store.currentPageIndex + 1)")
+                Text("Page \(pageIndex + 1)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -1547,16 +1852,12 @@ struct LivePagePreviewPanel: View {
                 .foregroundStyle(.secondary)
 
             InteractivePagePreviewCanvas(
-                document: store.previewDocument,
-                pageIndex: store.currentPageIndex,
+                document: document,
+                pageIndex: pageIndex,
                 selectedSlots: selectedSlots,
                 activePrintSlots: activePrintSlots,
-                onTapSlot: { slotIndex in
-                    store.selectPlacementStart(at: slotIndex)
-                },
-                onDragSlots: { startSlot, endSlot in
-                    store.selectPlacementRect(from: startSlot, to: endSlot)
-                }
+                onTapSlot: onTapSlot,
+                onDragSlots: onDragSlots
             )
                 .padding(4)
                 .background(
@@ -1565,9 +1866,7 @@ struct LivePagePreviewPanel: View {
                 )
 
             HStack {
-                Button("Reset Area") {
-                    store.clearPlacementSelection()
-                }
+                Button("Reset Area", action: onResetArea)
                 .buttonStyle(.bordered)
 
                 Label("Blue = print now", systemImage: "rectangle.dashed")
@@ -1576,7 +1875,7 @@ struct LivePagePreviewPanel: View {
 
                 Spacer()
 
-                Text("print \(activePrintSlots.count) · selected \(selectedSlots.count) · pages \(store.document.pageCount)")
+                Text("print \(activePrintSlots.count) · selected \(selectedSlots.count) · pages \(pageCount)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -1859,21 +2158,27 @@ struct LabelSlotView: View {
                 .stroke(borderColor, lineWidth: isPrintingNow ? 1.4 : 1)
 
             if context.isActive || !document.hasFiniteMergeRows {
-                ForEach(document.elements) { element in
-                    ElementRenderableView(
-                        element: element,
-                        context: context,
-                        serialSettings: document.serial,
-                        unitScale: unitScale
-                    )
-                    .frame(width: scaled(element.frame.width, by: unitScale), height: scaled(element.frame.height, by: unitScale))
-                    .position(
-                        x: scaled(element.frame.x + (element.frame.width / 2), by: unitScale),
-                        y: scaled(element.frame.y + (element.frame.height / 2), by: unitScale)
-                    )
-                    .rotationEffect(.degrees(element.rotation))
-                    .opacity(contentOpacity(for: element))
+                ZStack(alignment: .topLeading) {
+                    ForEach(document.elements) { element in
+                        ElementRenderableView(
+                            element: element,
+                            context: context,
+                            serialSettings: document.serial,
+                            unitScale: unitScale
+                        )
+                        .frame(width: scaled(element.frame.width, by: unitScale), height: scaled(element.frame.height, by: unitScale))
+                        .position(
+                            x: scaled(element.frame.x + (element.frame.width / 2), by: unitScale),
+                            y: scaled(element.frame.y + (element.frame.height / 2), by: unitScale)
+                        )
+                        .rotationEffect(.degrees(element.rotation))
+                        .opacity(contentOpacity(for: element))
+                    }
                 }
+                // Match the print path, which clips label contents to the
+                // label shape (PageRenderer.clip); without this, circle labels
+                // preview text that the printer would cut off.
+                .clipShape(LabelSurface(shape: document.sheet.shape, cornerRadiusMM: document.sheet.cornerRadiusMM))
             }
         }
     }
@@ -1906,6 +2211,16 @@ struct LabelSlotView: View {
     }
 }
 
+/// Sheet previews render the same element once per slot; building and
+/// display-scaling the attributed string dozens of times per refresh is a
+/// visible chunk of the per-keystroke cost, so results are memoized on the
+/// element + resolved text + scale.
+private final class RichDisplayTextBox {
+    let value: AttributedString
+    init(_ value: AttributedString) { self.value = value }
+}
+private let richDisplayTextCache = NSCache<NSString, RichDisplayTextBox>()
+
 struct ElementRenderableView: View {
     let element: LabelElement
     let context: MergeContext
@@ -1918,14 +2233,22 @@ struct ElementRenderableView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
                     .fill(element.background.color)
-                Text(TextLayoutRenderer.displayString(for: element, context: context, serialSettings: serialSettings))
-                    .font(displayFont(name: element.fontName, size: max(4, pointsToDisplay(element.fontSize, unitScale: unitScale)), isBold: element.isBold, isItalic: element.isItalic))
-                    .foregroundStyle(element.foreground.color)
-                    .underline(element.isUnderline, color: element.foreground.color)
-                    .multilineTextAlignment(element.textAlignment.multilineAlignment)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: element.textAlignment.alignment)
-                    .padding(.horizontal, CGFloat(1.0) * unitScale)
-                    .padding(.vertical, CGFloat(0.6) * unitScale)
+                Group {
+                    if let rich = richDisplayText() {
+                        // No .font/.foregroundStyle/.underline here — element-wide
+                        // modifiers would override the per-run inline attributes.
+                        Text(rich)
+                    } else {
+                        Text(TextLayoutRenderer.displayString(for: element, context: context, serialSettings: serialSettings))
+                            .font(displayFont(name: element.fontName, size: max(4, pointsToDisplay(element.fontSize, unitScale: unitScale)), isBold: element.isBold, isItalic: element.isItalic))
+                            .foregroundStyle(element.foreground.color)
+                            .underline(element.isUnderline, color: element.foreground.color)
+                    }
+                }
+                .multilineTextAlignment(element.textAlignment.multilineAlignment)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: element.textAlignment.alignment)
+                .padding(.horizontal, CGFloat(textElementInsetXMM) * unitScale)
+                .padding(.vertical, CGFloat(textElementInsetYMM) * unitScale)
             }
         case .rectangle:
             RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
@@ -1992,6 +2315,39 @@ struct ElementRenderableView: View {
                     )
             )
         }
+    }
+
+    /// Mirrors the print path (`TextLayoutRenderer.attributedString`) so inline
+    /// rich-text styling stays visible on the canvas and in the sheet preview;
+    /// the plain `Text` fallback can only show element-wide styling.
+    private func richDisplayText() -> AttributedString? {
+        guard
+            element.type == .text,
+            element.richTextRTF != nil,
+            LabelElement.plainText(fromRTF: element.richTextRTF) == element.content
+        else { return nil }
+
+        // The resolved string captures every context-dependent token
+        // ({{serial}}, columns, …), so element + resolved + scale fully
+        // determines the output.
+        let resolved = TextLayoutRenderer.displayString(for: element, context: context, serialSettings: serialSettings)
+        let cacheKey = "\(element.hashValue)|\(unitScale)|\(resolved)" as NSString
+        if let cached = richDisplayTextCache.object(forKey: cacheKey) {
+            return cached.value
+        }
+
+        let storage = TextLayoutRenderer.attributedString(for: element, context: context, serialSettings: serialSettings)
+        let display = NSMutableAttributedString(attributedString: storage)
+        // Enumerate `storage`, not `display`: mutating the string being
+        // enumerated can re-visit ranges and apply the scale twice.
+        storage.enumerateAttribute(.font, in: NSRange(location: 0, length: storage.length), options: []) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            let size = max(4, pointsToDisplay(Double(font.pointSize), unitScale: unitScale))
+            display.addAttribute(.font, value: font.withSize(size), range: range)
+        }
+        let result = AttributedString(display)
+        richDisplayTextCache.setObject(RichDisplayTextBox(result), forKey: cacheKey)
+        return result
     }
 }
 
@@ -2105,15 +2461,28 @@ struct StepperField: View {
     let value: Binding<Int>
     let range: ClosedRange<Int>
 
-    var body: some View {
-        Stepper(value: value, in: range) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text("\(value.wrappedValue)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+    private var clampedValue: Binding<Int> {
+        Binding(
+            get: {
+                min(max(value.wrappedValue, range.lowerBound), range.upperBound)
+            },
+            set: { newValue in
+                value.wrappedValue = min(max(newValue, range.lowerBound), range.upperBound)
             }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+            Spacer()
+            TextField(title, value: clampedValue, formatter: UIFormatters.integer)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(width: 78)
+            Stepper(title, value: clampedValue, in: range)
+                .labelsHidden()
         }
     }
 }

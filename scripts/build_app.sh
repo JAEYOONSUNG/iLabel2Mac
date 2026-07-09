@@ -5,16 +5,18 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$ROOT_DIR/dist/iLabel2Mac.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
-BUILD_BIN="$ROOT_DIR/.build/arm64-apple-macosx/release/iLabel2Mac"
+# Universal (arm64 + x86_64) binary so the app runs on both Apple Silicon and Intel Macs.
+BUILD_BIN="$ROOT_DIR/.build/apple/Products/Release/iLabel2Mac"
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
 cd "$ROOT_DIR"
-swift build -c release
+swift build -c release --arch arm64 --arch x86_64
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_BIN" "$MACOS_DIR/iLabel2Mac"
 chmod +x "$MACOS_DIR/iLabel2Mac"
+lipo -archs "$MACOS_DIR/iLabel2Mac"
 if [ -f "$ROOT_DIR/Resources/official_formats.json" ]; then
   cp "$ROOT_DIR/Resources/official_formats.json" "$RESOURCES_DIR/official_formats.json"
 fi

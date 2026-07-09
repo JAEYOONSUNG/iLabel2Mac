@@ -9,10 +9,25 @@ private let cachedAppearanceModeKey = "iLabel2Mac.cachedAppearanceMode"
 let quickTextInsertNotification = Notification.Name("iLabel2Mac.quickTextInsert")
 let textStyleActionNotification = Notification.Name("iLabel2Mac.textStyleAction")
 
-enum TextStyleAction: String {
+enum TextStyleAction: Equatable {
     case bold
     case italic
     case underline
+    case fontFamily(String)
+    case fontSize(Double)
+}
+
+/// Carries a style action to the active inline editor. Notification posting
+/// is synchronous, so `handled` reports back whether the editor consumed the
+/// action (e.g. applied it to a selection); if not, the store falls through
+/// to the element-wide behavior.
+final class TextStyleActionRequest {
+    let action: TextStyleAction
+    var handled = false
+
+    init(_ action: TextStyleAction) {
+        self.action = action
+    }
 }
 
 @MainActor
@@ -37,6 +52,20 @@ final class DocumentStore: ObservableObject {
 
     let officialFormats: [OfficialFormatDefinition]
     private var previewRefreshWorkItem: DispatchWorkItem?
+    private var lastPreviewRefreshAt = Date.distantPast
+    private let previewRefreshInterval: TimeInterval = 0.12
+
+    // Undo/redo history of whole-document snapshots. Rapid edits that share a
+    // coalescing key within `undoCoalescingInterval` (a drag, a typing burst)
+    // collapse into a single undo step.
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    private var undoStack: [LabelDocument] = []
+    private var redoStack: [LabelDocument] = []
+    private var lastUndoCoalescingKey: String?
+    private var lastUndoTime = Date.distantPast
+    private let undoCoalescingInterval: TimeInterval = 1.0
+    private let maxUndoDepth = 80
 
     init() {
         officialFormats = OfficialFormatCatalog.load()
@@ -91,18 +120,80 @@ final class DocumentStore: ObservableObject {
         }
     }
 
+    private func recordUndo(coalescingKey: String?) {
+        let now = Date()
+        let coalesce = coalescingKey != nil
+            && coalescingKey == lastUndoCoalescingKey
+            && now.timeIntervalSince(lastUndoTime) < undoCoalescingInterval
+        lastUndoCoalescingKey = coalescingKey
+        lastUndoTime = now
+        guard !coalesce else { return }
+
+        undoStack.append(document)
+        if undoStack.count > maxUndoDepth {
+            undoStack.removeFirst(undoStack.count - maxUndoDepth)
+        }
+        redoStack.removeAll()
+        refreshUndoState()
+    }
+
+    private func refreshUndoState() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    func clearUndoHistory() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+        lastUndoCoalescingKey = nil
+        refreshUndoState()
+    }
+
+    func undo() {
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(document)
+        applyRestoredDocument(previous)
+        statusMessage = "Undo"
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(document)
+        applyRestoredDocument(next)
+        statusMessage = "Redo"
+    }
+
+    private func applyRestoredDocument(_ restored: LabelDocument) {
+        lastUndoCoalescingKey = nil
+        document = restored
+        document.clampElementsToSheet()
+        if let selectedElementID, !document.elements.contains(where: { $0.id == selectedElementID }) {
+            self.selectedElementID = document.elements.first?.id
+        }
+        editingElementID = nil
+        persistPrintAutomationCache(document.printAutomation)
+        currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
+        refreshUndoState()
+        schedulePreviewRefresh(immediate: true)
+    }
+
     func updateSheet(_ edit: (inout SheetTemplate) -> Void) {
+        recordUndo(coalescingKey: "sheet")
         edit(&document.sheet)
         document.clampElementsToSheet()
         currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
         schedulePreviewRefresh()
     }
 
-    func updateDocument(_ edit: (inout LabelDocument) -> Void) {
+    func updateDocument(coalescingKey: String? = "document", _ edit: (inout LabelDocument) -> Void) {
+        recordUndo(coalescingKey: coalescingKey)
         edit(&document)
         document.clampElementsToSheet()
         persistPrintAutomationCache(document.printAutomation)
-        refreshCurrentWiFiSSID()
+        // No refreshCurrentWiFiSSID() here: it spawns `networksetup`
+        // synchronously (tens–hundreds of ms) and this method runs on every
+        // keystroke of the title/notes/Wi-Fi text fields — it froze the UI.
+        // The SSID label refreshes where it matters: save, test, and print.
         currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
         schedulePreviewRefresh()
     }
@@ -118,12 +209,23 @@ final class DocumentStore: ObservableObject {
         guard let index = document.elements.firstIndex(where: { $0.id == id }) else {
             return
         }
+        recordUndo(coalescingKey: "elem:\(id.uuidString)")
         edit(&document.elements[index])
         document.elements[index].frame = document.elements[index].frame.clamped(
             maxWidth: document.sheet.labelWidthMM,
             maxHeight: document.sheet.labelHeightMM
         )
         schedulePreviewRefresh()
+    }
+
+    /// Applies the inline editor's plain text and rich-text payload in a
+    /// single edit, so observers never see `content` published without its
+    /// matching `richTextRTF` (or vice versa).
+    func updateTextElement(id: UUID, content: String, richTextRTF: Data?) {
+        updateElement(id: id) { element in
+            element.content = content
+            element.richTextRTF = richTextRTF
+        }
     }
 
     func selectElement(_ id: UUID?, beginEditing: Bool = false) {
@@ -243,8 +345,14 @@ final class DocumentStore: ObservableObject {
 
     func applyTextStyleAction(_ action: TextStyleAction) {
         if editingElementID != nil {
-            NotificationCenter.default.post(name: textStyleActionNotification, object: action)
-            return
+            let request = TextStyleActionRequest(action)
+            NotificationCenter.default.post(name: textStyleActionNotification, object: request)
+            // The editor declines font/size actions when nothing is selected
+            // (and is absent entirely in that window state), in which case the
+            // action applies element-wide below.
+            if request.handled {
+                return
+            }
         }
 
         guard let selectedElement, selectedElement.type == .text else { return }
@@ -256,6 +364,18 @@ final class DocumentStore: ObservableObject {
                 element.isItalic.toggle()
             case .underline:
                 element.isUnderline.toggle()
+            case .fontFamily(let name):
+                element.fontName = name
+                // Rich-text runs carry their own family (per-selection fonts),
+                // so an element-wide change must rewrite them too — otherwise
+                // it only affects newly typed characters.
+                element.richTextRTF = LabelElement.rewritingFontFamily(of: element.richTextRTF, to: name)
+            case .fontSize(let size):
+                // Runs carry their own size too; scale them proportionally so
+                // a mixed-size design keeps its ratios when resized as a whole.
+                let ratio = size / max(element.fontSize, 0.1)
+                element.fontSize = size
+                element.richTextRTF = LabelElement.scalingFontSizes(of: element.richTextRTF, by: ratio)
             }
         }
     }
@@ -352,6 +472,7 @@ final class DocumentStore: ObservableObject {
         projectURL = nil
         selectedElementID = document.elements.first?.id
         editingElementID = nil
+        clearUndoHistory()
         schedulePreviewRefresh(immediate: true)
         statusMessage = "Started a new label project"
     }
@@ -402,6 +523,7 @@ final class DocumentStore: ObservableObject {
     }
 
     func addElement(_ type: ElementType) {
+        recordUndo(coalescingKey: nil)
         let count = document.elements.filter { $0.type == type }.count + 1
         let element: LabelElement
         switch type {
@@ -461,6 +583,7 @@ final class DocumentStore: ObservableObject {
 
     func duplicateSelected() {
         guard var copy = selectedElement else { return }
+        recordUndo(coalescingKey: nil)
         copy.id = UUID()
         copy.name += " Copy"
         copy.frame.x += 3
@@ -478,6 +601,7 @@ final class DocumentStore: ObservableObject {
             return
         }
 
+        recordUndo(coalescingKey: nil)
         let removed = document.elements.remove(at: index)
         self.selectedElementID = document.elements.last?.id
         if editingElementID == removed.id {
@@ -503,13 +627,18 @@ final class DocumentStore: ObservableObject {
 
         do {
             let data = try Data(contentsOf: url)
-            let loaded = try JSONDecoder().decode(LabelDocument.self, from: data)
+            var loaded = try JSONDecoder().decode(LabelDocument.self, from: data)
+            // Register bundled custom fonts (process scope) so missing fonts
+            // resolve to the original faces, then drop the bytes from memory.
+            FontEmbedder.register(loaded.embeddedFonts)
+            loaded.embeddedFonts = nil
             document = loaded
             document.clampElementsToSheet()
             projectURL = url
             selectedElementID = document.elements.first?.id
             editingElementID = nil
             currentPageIndex = 0
+            clearUndoHistory()
             schedulePreviewRefresh(immediate: true)
             statusMessage = "Opened \(url.lastPathComponent)"
         } catch {
@@ -519,7 +648,12 @@ final class DocumentStore: ObservableObject {
 
     func saveProject() {
         do {
-            let data = try JSONEncoder.pretty.encode(document)
+            // Bundle any custom (non-system) fonts into the saved copy so the
+            // project renders identically on machines that lack them. Kept out
+            // of the live in-memory document to keep undo snapshots light.
+            var documentToSave = document
+            documentToSave.embeddedFonts = FontEmbedder.collect(from: documentToSave)
+            let data = try JSONEncoder.pretty.encode(documentToSave)
             let targetURL = try saveURL(
                 existingURL: projectURL,
                 suggestedName: "\(document.title.replacingOccurrences(of: " ", with: "-")).ilabelmac.json",
@@ -599,6 +733,23 @@ final class DocumentStore: ObservableObject {
         }
     }
 
+    func exportAllPagesPDF() {
+        do {
+            let renderDocument = prepareRenderableDocument()
+            let pageCount = renderDocument.pageCount
+            let data = PageRenderer.pdfDataAllPages(document: renderDocument)
+            let url = try saveURL(
+                existingURL: nil,
+                suggestedName: "\(renderDocument.title.replacingOccurrences(of: " ", with: "-"))-all-\(pageCount)pages.pdf",
+                allowedTypes: [.pdf]
+            )
+            try data.write(to: url, options: .atomic)
+            statusMessage = "Exported PDF (\(pageCount) page\(pageCount == 1 ? "" : "s")): \(url.lastPathComponent)"
+        } catch {
+            statusMessage = "PDF export failed: \(error.localizedDescription)"
+        }
+    }
+
     func exportPNG() {
         do {
             let renderDocument = prepareRenderableDocument()
@@ -647,11 +798,26 @@ final class DocumentStore: ObservableObject {
                     }
                 }
 
-                await MainActor.run {
+                let didSubmit = await MainActor.run {
                     PageRenderer.print(document: snapshot, pageIndex: pageIndex)
                 }
 
                 if let session {
+                    // Only hold the printer connection open if a job was actually
+                    // submitted. If the user cancelled the print panel there is
+                    // nothing to drain, so restore immediately.
+                    if didSubmit {
+                        await MainActor.run {
+                            wifiTestStatus = "Sending job to printer..."
+                            statusMessage = "Waiting for the print job to reach the printer..."
+                        }
+                        // Critical: NSPrintOperation.run() only spools the job;
+                        // CUPS transmits it over Wi-Fi afterwards. Restoring the
+                        // network now would abort that transfer, so wait for the
+                        // queue to drain first.
+                        await WiFiPrintAutomation.waitForPrintJobsToClear()
+                    }
+
                     await MainActor.run {
                         wifiTestStatus = "Restoring previous Wi-Fi..."
                         statusMessage = "Restoring previous Wi-Fi..."
@@ -660,7 +826,9 @@ final class DocumentStore: ObservableObject {
                     await MainActor.run {
                         refreshCurrentWiFiSSID()
                         wifiTestStatus = "Restored to \(currentWiFiSSID)"
-                        statusMessage = "Returned to previous Wi-Fi after printing"
+                        statusMessage = didSubmit
+                            ? "Printed, then returned to previous Wi-Fi"
+                            : "Print cancelled; returned to previous Wi-Fi"
                     }
                 } else {
                     await MainActor.run {
@@ -687,21 +855,52 @@ final class DocumentStore: ObservableObject {
     }
 
     private func schedulePreviewRefresh(immediate: Bool = false) {
-        previewRefreshWorkItem?.cancel()
-
         if immediate {
+            previewRefreshWorkItem?.cancel()
+            previewRefreshWorkItem = nil
+            lastPreviewRefreshAt = Date()
             previewDocument = document
             return
         }
 
-        let snapshot = document
+        // While the inline editor is open the user watches the live NSTextView,
+        // so the sheet preview may lag: never render it synchronously inside
+        // the keystroke path (that's what made typing feel slow), and never
+        // cancel-and-reschedule (a pure trailing debounce starves the preview
+        // during continuous typing). One pending refresh per window publishes
+        // the latest document when it fires; finishing the edit refreshes
+        // immediately via the `immediate` path above.
+        if editingElementID != nil {
+            guard previewRefreshWorkItem == nil else { return }
+            scheduleTrailingPreviewRefresh(after: 0.6)
+            return
+        }
+
+        previewRefreshWorkItem?.cancel()
+        previewRefreshWorkItem = nil
+
+        // Leading edge outside editing: refresh right away unless one just
+        // happened, so single edits (drags, inspector tweaks) feel live.
+        if Date().timeIntervalSince(lastPreviewRefreshAt) >= previewRefreshInterval {
+            lastPreviewRefreshAt = Date()
+            previewDocument = document
+            return
+        }
+
+        scheduleTrailingPreviewRefresh(after: previewRefreshInterval)
+    }
+
+    private func scheduleTrailingPreviewRefresh(after delay: TimeInterval) {
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
-                self?.previewDocument = snapshot
+                guard let self else { return }
+                self.previewRefreshWorkItem = nil
+                self.lastPreviewRefreshAt = Date()
+                self.previewDocument = self.document
             }
         }
         previewRefreshWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     private func loadCachedPrintAutomation() -> PrintAutomationSettings {
@@ -743,7 +942,9 @@ final class DocumentStore: ObservableObject {
     }
 
     private func refreshCurrentWiFiSSID() {
-        currentWiFiSSID = WiFiPrintAutomation.currentSSID(service: document.printAutomation.wifiService) ?? "Unknown"
+        // macOS 15+ redacts the SSID from every CLI without Location Services,
+        // so "Unknown" here is expected on modern systems, not an error.
+        currentWiFiSSID = WiFiPrintAutomation.currentSSID(service: document.printAutomation.wifiService) ?? "Unknown (hidden by macOS)"
     }
 
     private func saveURL(existingURL: URL?, suggestedName: String, allowedTypes: [UTType]) throws -> URL {
