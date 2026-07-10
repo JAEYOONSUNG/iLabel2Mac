@@ -253,14 +253,44 @@ enum WiFiPrintAutomation {
         if let password, !password.isEmpty {
             arguments.append(password)
         }
-        _ = try run("/usr/sbin/networksetup", arguments)
+        let output = try run("/usr/sbin/networksetup", arguments, combineStderrOnSuccess: true)
+        if let failure = joinFailureMessage(output) {
+            throw WiFiAutomationError.commandFailed(failure)
+        }
+    }
+
+    /// `networksetup -setairportnetwork` exits 0 even when the join fails
+    /// (verified on macOS 26.5), reporting the problem only as text — e.g.
+    /// "Could not find network X." when the SSID isn't broadcasting, or
+    /// "Failed to join network X." on a bad password. Treating those as
+    /// success made a failed switch look like it worked, and the print job
+    /// then went to the wrong network. The markers are English-only on
+    /// purpose: networksetup's output is not localized (verified under
+    /// LANG=ko_KR.UTF-8 on macOS 26.5). This detection is load-bearing —
+    /// waitUntilConnected's stable-lease success path assumes a join that
+    /// produced no failure text here really did associate.
+    static func joinFailureMessage(_ output: String) -> String? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lowered = trimmed.lowercased()
+        let failureMarkers = [
+            "could not find network",
+            "failed to join network",
+            "could not join",
+            "is not a wi-fi interface",
+            "error"
+        ]
+        if failureMarkers.contains(where: { lowered.contains($0) }) {
+            return trimmed
+        }
+        return nil
     }
 
     static func connectAndWait(
         service: String,
         ssid: String,
         password: String?,
-        timeoutSeconds: Double = 12.0
+        timeoutSeconds: Double = 20.0
     ) async throws {
         // Snapshot the lease before switching: on macOS 15+ the SSID is
         // redacted from every CLI, so a changed DHCP address is the only
@@ -279,13 +309,14 @@ enum WiFiPrintAutomation {
     static func waitUntilConnected(
         service: String,
         expectedSSID: String,
-        timeoutSeconds: Double = 12.0,
+        timeoutSeconds: Double = 20.0,
         previousIPv4: String? = nil
     ) async throws {
         let device = wifiDevice()
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var associated = false
         var ssidReadable = false
+        var sameLeaseSince: Date?
         while Date() < deadline {
             if let ssid = currentSSID(service: service) {
                 ssidReadable = true
@@ -297,11 +328,32 @@ enum WiFiPrintAutomation {
                         return
                     }
                 }
-            } else if let device, let ip = ipv4Address(device: device), ip != previousIPv4 {
-                // SSID unreadable (redacted on macOS 15+): a fresh DHCP lease
-                // that differs from the pre-switch address means the join
-                // completed and the new network is reachable.
-                return
+            } else if let device {
+                let ip = ipv4Address(device: device)
+                if let ip, ip != previousIPv4 {
+                    // SSID unreadable (redacted on macOS 15+): a fresh DHCP
+                    // lease that differs from the pre-switch address means the
+                    // join completed and the new network is reachable.
+                    return
+                }
+                if let ip, ip == previousIPv4 {
+                    // Same address as before the switch. A genuine
+                    // re-association always drops the lease at least briefly,
+                    // so an address that never wavers means we were already on
+                    // the target network (the join command itself reported no
+                    // failure, or connect() would have thrown). Without this,
+                    // printing while already on the printer's network spins
+                    // for the full timeout and fails.
+                    if let since = sameLeaseSince {
+                        if Date().timeIntervalSince(since) >= 4.0 {
+                            return
+                        }
+                    } else {
+                        sameLeaseSince = Date()
+                    }
+                } else {
+                    sameLeaseSince = nil
+                }
             }
             try? await Task.sleep(nanoseconds: 400_000_000)
         }
@@ -312,17 +364,24 @@ enum WiFiPrintAutomation {
         if associated {
             return
         }
-        // SSID never became readable (redacted): if the interface holds any
-        // address at all, assume the join worked rather than failing a print
-        // we can't actually verify.
-        if !ssidReadable, let device, ipv4Address(device: device) != nil {
+        // SSID never became readable (redacted): only accept the join if the
+        // interface picked up a *different* address than before the switch.
+        // Accepting any address at all treated "still on the old network"
+        // as success, silently masking every failed switch on macOS 15+.
+        if !ssidReadable, let device, let ip = ipv4Address(device: device), ip != previousIPv4 {
             return
         }
-        throw WiFiAutomationError.connectionTimeout("Timed out waiting to connect to \(expectedSSID)")
+        throw WiFiAutomationError.connectionTimeout(
+            "Timed out waiting to connect to \(expectedSSID). The network address never changed — the printer may be off, asleep, or out of range."
+        )
     }
 
     @discardableResult
-    private static func run(_ launchPath: String, _ arguments: [String]) throws -> String {
+    private static func run(
+        _ launchPath: String,
+        _ arguments: [String],
+        combineStderrOnSuccess: Bool = false
+    ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
@@ -345,6 +404,11 @@ enum WiFiPrintAutomation {
             throw WiFiAutomationError.commandFailed(message.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
+        // networksetup reports some failures with exit code 0; callers that
+        // parse output for failure text need stderr too, not just stdout.
+        if combineStderrOnSuccess, !error.isEmpty {
+            return (output + "\n" + error).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

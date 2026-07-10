@@ -45,4 +45,26 @@ final class WiFiRestoreTests: XCTestCase {
         )
         XCTAssertNil(target)
     }
+
+    // `networksetup -setairportnetwork` exits 0 on failure and reports the
+    // problem only as text (verified on macOS 26.5), so join success/failure
+    // must be decided from the output.
+
+    func testJoinFailureDetectedWhenNetworkNotFound() {
+        let message = WiFiPrintAutomation.joinFailureMessage("Could not find network DIRECT-6E-HP LaserJet.")
+        XCTAssertEqual(message, "Could not find network DIRECT-6E-HP LaserJet.")
+    }
+
+    func testJoinFailureDetectedOnBadPassword() {
+        XCTAssertNotNil(WiFiPrintAutomation.joinFailureMessage("Failed to join network HomeNet5G."))
+    }
+
+    func testJoinFailureDetectedOnGenericError() {
+        XCTAssertNotNil(WiFiPrintAutomation.joinFailureMessage("Error: en0 is not a Wi-Fi interface."))
+    }
+
+    func testSilentOutputMeansJoinSucceeded() {
+        XCTAssertNil(WiFiPrintAutomation.joinFailureMessage(""))
+        XCTAssertNil(WiFiPrintAutomation.joinFailureMessage("  \n"))
+    }
 }

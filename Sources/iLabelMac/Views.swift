@@ -1428,6 +1428,15 @@ struct AppKitInlineTextField: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.parent = self
 
+        // While a trailing sync is pending, the editor's storage is strictly
+        // newer than the store. Any update arriving in that window (e.g. the
+        // 0.6s previewDocument publish re-evaluating this view) carries stale
+        // text; applying it would erase the last keystrokes and clamp the
+        // cursor to the end of the reverted line.
+        if context.coordinator.pendingSyncWorkItem != nil {
+            return
+        }
+
         // Completely no-op when this update just echoes what the editor
         // itself produced (every keystroke round-trips through the store).
         // Touching typingAttributes/layout here invalidates the
@@ -2211,15 +2220,44 @@ struct LabelSlotView: View {
     }
 }
 
-/// Sheet previews render the same element once per slot; building and
-/// display-scaling the attributed string dozens of times per refresh is a
-/// visible chunk of the per-keystroke cost, so results are memoized on the
-/// element + resolved text + scale.
-private final class RichDisplayTextBox {
-    let value: AttributedString
-    init(_ value: AttributedString) { self.value = value }
+/// Draws a text element through the exact print code path
+/// (`PageRenderer.drawText`) with only a CTM scale applied, so preview line
+/// wrapping matches the printed output glyph-for-glyph. SwiftUI `Text` lays
+/// out with a different engine at display-scaled font sizes, which broke
+/// lines at slightly different characters than the print render.
+struct PrintFidelityTextView: View {
+    let element: LabelElement
+    let context: MergeContext
+    let serialSettings: SerialSettings
+    let unitScale: CGFloat
+
+    var body: some View {
+        Canvas { graphics, size in
+            graphics.withCGContext { cg in
+                // Display pixels per print point: layout happens at print
+                // point sizes and only the finished drawing is scaled, so
+                // wrap decisions are identical to the PDF by construction.
+                let scale = unitScale / CGFloat(mmToPointsRatio)
+                guard scale > 0, size.width > 0, size.height > 0 else { return }
+                cg.translateBy(x: 0, y: size.height)
+                cg.scaleBy(x: scale, y: -scale)
+                let rect = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: mmToPoints(element.frame.width),
+                    height: mmToPoints(element.frame.height)
+                )
+                PageRenderer.drawText(
+                    element: element,
+                    rect: rect,
+                    context: cg,
+                    mergeContext: context,
+                    serialSettings: serialSettings
+                )
+            }
+        }
+    }
 }
-private let richDisplayTextCache = NSCache<NSString, RichDisplayTextBox>()
 
 struct ElementRenderableView: View {
     let element: LabelElement
@@ -2233,22 +2271,14 @@ struct ElementRenderableView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
                     .fill(element.background.color)
-                Group {
-                    if let rich = richDisplayText() {
-                        // No .font/.foregroundStyle/.underline here — element-wide
-                        // modifiers would override the per-run inline attributes.
-                        Text(rich)
-                    } else {
-                        Text(TextLayoutRenderer.displayString(for: element, context: context, serialSettings: serialSettings))
-                            .font(displayFont(name: element.fontName, size: max(4, pointsToDisplay(element.fontSize, unitScale: unitScale)), isBold: element.isBold, isItalic: element.isItalic))
-                            .foregroundStyle(element.foreground.color)
-                            .underline(element.isUnderline, color: element.foreground.color)
-                    }
-                }
-                .multilineTextAlignment(element.textAlignment.multilineAlignment)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: element.textAlignment.alignment)
-                .padding(.horizontal, CGFloat(textElementInsetXMM) * unitScale)
-                .padding(.vertical, CGFloat(textElementInsetYMM) * unitScale)
+                // Insets, wrapping, alignment, and vertical centering all live
+                // inside the shared print path — no SwiftUI padding here.
+                PrintFidelityTextView(
+                    element: element,
+                    context: context,
+                    serialSettings: serialSettings,
+                    unitScale: unitScale
+                )
             }
         case .rectangle:
             RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
@@ -2317,38 +2347,6 @@ struct ElementRenderableView: View {
         }
     }
 
-    /// Mirrors the print path (`TextLayoutRenderer.attributedString`) so inline
-    /// rich-text styling stays visible on the canvas and in the sheet preview;
-    /// the plain `Text` fallback can only show element-wide styling.
-    private func richDisplayText() -> AttributedString? {
-        guard
-            element.type == .text,
-            element.richTextRTF != nil,
-            LabelElement.plainText(fromRTF: element.richTextRTF) == element.content
-        else { return nil }
-
-        // The resolved string captures every context-dependent token
-        // ({{serial}}, columns, …), so element + resolved + scale fully
-        // determines the output.
-        let resolved = TextLayoutRenderer.displayString(for: element, context: context, serialSettings: serialSettings)
-        let cacheKey = "\(element.hashValue)|\(unitScale)|\(resolved)" as NSString
-        if let cached = richDisplayTextCache.object(forKey: cacheKey) {
-            return cached.value
-        }
-
-        let storage = TextLayoutRenderer.attributedString(for: element, context: context, serialSettings: serialSettings)
-        let display = NSMutableAttributedString(attributedString: storage)
-        // Enumerate `storage`, not `display`: mutating the string being
-        // enumerated can re-visit ranges and apply the scale twice.
-        storage.enumerateAttribute(.font, in: NSRange(location: 0, length: storage.length), options: []) { value, range, _ in
-            guard let font = value as? NSFont else { return }
-            let size = max(4, pointsToDisplay(Double(font.pointSize), unitScale: unitScale))
-            display.addAttribute(.font, value: font.withSize(size), range: range)
-        }
-        let result = AttributedString(display)
-        richDisplayTextCache.setObject(RichDisplayTextBox(result), forKey: cacheKey)
-        return result
-    }
 }
 
 struct GridBackdrop: View {
