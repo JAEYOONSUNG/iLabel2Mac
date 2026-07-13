@@ -130,15 +130,18 @@ struct ContentView: View {
             ToolbarStrip(store: store)
             Divider()
 
+            // Pane minimums must sum to less than the window's minimum width
+            // (plus dividers) or shrinking the window clips the inspector on
+            // the right instead of compressing the panes.
             HSplitView {
                 SidebarView(store: store)
-                    .frame(minWidth: 300, idealWidth: 320, maxWidth: 360)
+                    .frame(minWidth: 250, idealWidth: 320, maxWidth: 360)
 
                 EditorPane(store: store)
-                    .frame(minWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
 
                 InspectorView(store: store)
-                    .frame(minWidth: 320, idealWidth: 340, maxWidth: 400)
+                    .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
             }
         }
         .background(appChromeBackground())
@@ -149,6 +152,9 @@ struct ToolbarStrip: View {
     @ObservedObject var store: DocumentStore
 
     var body: some View {
+        // Horizontally scrollable so a narrow window scrolls the toolbar
+        // instead of clipping the trailing controls.
+        ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 12) {
             ControlGroup {
                 Button("New", action: store.newDocument)
@@ -244,6 +250,9 @@ struct ToolbarStrip: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        .padding(.horizontal, 12)
+        .frame(height: 46)
+        }
         .background {
             // Invisible shortcut carriers. Disabled while inline-editing text so
             // the NSTextView keeps its own ⌘Z for character-level undo.
@@ -259,8 +268,6 @@ struct ToolbarStrip: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
         .frame(height: 46)
         .background(
             LinearGradient(
@@ -522,16 +529,20 @@ struct EditorPane: View {
                     )
 
                 if store.canvasMode == .label {
-                    HStack(spacing: 0) {
-                        SingleLabelCanvas(store: store)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The preview column scales with the pane instead of a
+                    // fixed 420pt, which clipped it when the window shrank.
+                    GeometryReader { proxy in
+                        HStack(spacing: 0) {
+                            SingleLabelCanvas(store: store)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                        Divider()
-                            .padding(.vertical, 18)
+                            Divider()
+                                .padding(.vertical, 18)
 
-                        LivePagePreviewPanel(store: store)
-                            .frame(width: 420)
-                            .frame(maxHeight: .infinity)
+                            LivePagePreviewPanel(store: store)
+                                .frame(width: min(420, max(220, proxy.size.width * 0.4)))
+                                .frame(maxHeight: .infinity)
+                        }
                     }
                 } else {
                     PagePreviewCanvas(store: store)
@@ -1339,6 +1350,53 @@ struct InlineEditableTextField: View {
     }
 }
 
+/// Pasting (and text drops) must adopt the label's current typing style.
+/// Foreign RTF/HTML from other apps carries its own font runs; once stored,
+/// the element-wide Size control scales runs proportionally
+/// (`scalingFontSizes`), so a pasted run never converges to the entered
+/// size — it just multiplies from the foreign baseline.
+final class MatchStylePasteTextView: NSTextView {
+    override func paste(_ sender: Any?) {
+        pasteAsPlainText(sender)
+    }
+
+    override func pasteAsRichText(_ sender: Any?) {
+        pasteAsPlainText(sender)
+    }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard let plain = Self.plainString(from: pboard, incomingType: type) else {
+            return super.readSelection(from: pboard, type: type)
+        }
+        let range = rangeForUserTextChange
+        guard range.location != NSNotFound else { return false }
+        insertText(plain, replacementRange: range)
+        return true
+    }
+
+    /// Plain-text equivalent of a rich flavor, or nil when the default
+    /// reader should run (plain string, file URLs, images — the latter are
+    /// already rejected by `importsGraphics = false`). Rich data without a
+    /// companion .string flavor is converted here rather than imported.
+    private static func plainString(from pboard: NSPasteboard, incomingType: NSPasteboard.PasteboardType) -> String? {
+        guard incomingType == .rtf || incomingType == .rtfd || incomingType == .html else {
+            return nil
+        }
+        if let string = pboard.string(forType: .string) {
+            return string
+        }
+        guard let data = pboard.data(forType: incomingType) else { return nil }
+        switch incomingType {
+        case .rtf:
+            return NSAttributedString(rtf: data, documentAttributes: nil)?.string
+        case .rtfd:
+            return NSAttributedString(rtfd: data, documentAttributes: nil)?.string
+        default:
+            return NSAttributedString(html: data, documentAttributes: nil)?.string
+        }
+    }
+}
+
 struct AppKitInlineTextField: NSViewRepresentable {
     let text: String
     let richTextData: Data?
@@ -1389,7 +1447,7 @@ struct AppKitInlineTextField: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
 
-        let textView = NSTextView()
+        let textView = MatchStylePasteTextView()
         textView.drawsBackground = false
         textView.isRichText = true
         textView.importsGraphics = false

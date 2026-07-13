@@ -59,6 +59,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSLocationUsageDescription</key>
+    <string>Wi-Fi printing needs Location access: macOS only lets apps read the Wi-Fi network name and switch to the printer's Wi-Fi when Location Services is allowed.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Wi-Fi printing needs Location access: macOS only lets apps read the Wi-Fi network name and switch to the printer's Wi-Fi when Location Services is allowed.</string>
 </dict>
 </plist>
 PLIST

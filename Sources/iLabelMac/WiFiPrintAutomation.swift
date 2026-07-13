@@ -1,4 +1,50 @@
 import Foundation
+import CoreWLAN
+import CoreLocation
+
+/// macOS 15+ gates programmatic Wi-Fi control behind Location Services:
+/// without it, scan results come back with the SSID redacted and
+/// `CWInterface.associate` fails with -3900 tmpErr even with the correct
+/// password (verified on macOS 26 — the Wi-Fi menu works because system UI
+/// is exempt). Requesting once at launch is what makes Wi-Fi printing
+/// possible at all on modern macOS.
+final class LocationPermission: NSObject, CLLocationManagerDelegate {
+    static let shared = LocationPermission()
+    private let manager = CLLocationManager()
+    private let lock = NSLock()
+    private var authorized = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        cacheStatus(manager.authorizationStatus)
+    }
+
+    func requestIfNeeded() {
+        if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
+    /// Safe to read from any thread — CLLocationManager itself wants the
+    /// main thread, so the status is cached via the delegate callback.
+    var isAuthorized: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return authorized
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        cacheStatus(manager.authorizationStatus)
+    }
+
+    private func cacheStatus(_ status: CLAuthorizationStatus) {
+        let granted = status == .authorizedAlways || status == .authorized
+        lock.lock()
+        authorized = granted
+        lock.unlock()
+    }
+}
 
 enum WiFiAutomationError: LocalizedError {
     case missingPrinterSSID
@@ -27,24 +73,56 @@ struct WiFiPrintSession {
 
     func restore() async throws {
         guard settings.enabled, settings.reconnectToPreviousWiFi else { return }
-        guard let target = WiFiPrintAutomation.restoreTargetSSID(
+        let target = WiFiPrintAutomation.restoreTargetSSID(
             previousSSID: previousSSID,
             configuredRestoreSSID: settings.restoreSSID,
             printerSSID: settings.printerSSID,
             preferredNetworks: WiFiPrintAutomation.preferredNetworks()
-        ) else { return }
-        try await WiFiPrintAutomation.connectAndWait(
-            service: service,
-            ssid: target,
-            password: nil
         )
+        if let target {
+            do {
+                try await WiFiPrintAutomation.connectAndWait(
+                    service: service,
+                    ssid: target,
+                    password: nil
+                )
+                return
+            } catch {
+                // Direct rejoin can fail (e.g. the network's password isn't
+                // readable to us) — fall through to the system auto-join.
+            }
+        }
+        try await WiFiPrintAutomation.autoJoinFallback(printerSSID: settings.printerSSID)
     }
 }
 
 enum WiFiPrintAutomation {
     static let airportTool = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
 
+    /// macOS 15+ redacts the SSID from every CLI (networksetup reports
+    /// "not associated" even while connected — verified on macOS 26), so
+    /// SSID reads can never succeed there. Deciding by OS version, not by
+    /// observed failures, matters: a read that fails because Wi-Fi happens
+    /// to be off at launch must not permanently disable the SSID paths on
+    /// systems where reads do work.
+    static let systemRedactsSSID: Bool = {
+        if #available(macOS 15, *) {
+            return true
+        }
+        return false
+    }()
+
+    /// The Wi-Fi device name (e.g. "en0") never changes while the app runs,
+    /// but probing it spawns `networksetup -listallhardwareports` (hundreds
+    /// of ms) — and it used to be probed again inside every SSID read and
+    /// every 400ms poll of the connect wait. Resolve it once.
+    private static let cachedWiFiDevice: String? = probeWiFiDevice()
+
     static func wifiDevice() -> String? {
+        cachedWiFiDevice
+    }
+
+    private static func probeWiFiDevice() -> String? {
         guard let output = try? run("/usr/sbin/networksetup", ["-listallhardwareports"]) else {
             return nil
         }
@@ -67,11 +145,23 @@ enum WiFiPrintAutomation {
     }
 
     static func currentSSID(service: String) -> String? {
-        // Preferred: `networksetup -getairportnetwork <device>`. Works on modern
-        // macOS with no extra frameworks or Location Services permission.
-        // Apple removed the private `airport` tool in macOS 14.4, which used to
-        // be the only path here — its loss made waitUntilConnected() always time
-        // out (it could never confirm the connection), breaking Wi-Fi printing.
+        // First choice: in-process CoreWLAN. Instant (no process spawn), and
+        // once the user grants Location Services it is the only reader that
+        // still works on macOS 15+ (every CLI redacts the SSID there).
+        if let ssid = CWWiFiClient.shared().interface()?.ssid(), !ssid.isEmpty {
+            return ssid
+        }
+        // On redacted systems the CLI fallbacks below can't do better than
+        // the CoreWLAN read — skip their process spawns entirely.
+        if systemRedactsSSID {
+            return nil
+        }
+
+        // Fallback: `networksetup -getairportnetwork <device>`. Works on
+        // pre-15 macOS with no Location Services permission. Apple removed
+        // the private `airport` tool in macOS 14.4, which used to be the only
+        // path here — its loss made waitUntilConnected() always time out (it
+        // could never confirm the connection), breaking Wi-Fi printing.
         if let device = wifiDevice(),
            let output = try? run("/usr/sbin/networksetup", ["-getairportnetwork", device]) {
             let marker = "Current Wi-Fi Network: "
@@ -170,46 +260,106 @@ enum WiFiPrintAutomation {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Number of print jobs currently queued/active across all CUPS printers.
-    /// `lpstat -o` lists one line per pending job and prints nothing when the
-    /// queue is empty. Any failure is treated as "unknown" (0) so it never
-    /// blocks the restore step indefinitely.
-    static func pendingPrintJobCount() -> Int {
+    /// Job IDs currently queued/active across all CUPS printers (first token
+    /// of each `lpstat -o` line). Returns nil when lpstat itself fails — the
+    /// callers must treat "unknown" as "not drained", never as "empty"
+    /// (an lpstat failure once read as an empty queue and cut the printer
+    /// connection mid-transfer).
+    static func pendingJobIDs() -> Set<String>? {
         guard let output = try? run("/usr/bin/lpstat", ["-o"]) else {
-            return 0
+            return nil
         }
-        return output
+        let ids = output
             .components(separatedBy: .newlines)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .count
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .compactMap { $0.components(separatedBy: .whitespaces).first }
+        return Set(ids)
     }
 
-    /// Holds the current (printer) Wi-Fi connection until CUPS has drained the
-    /// spooled job to the printer. `NSPrintOperation.run()` only submits the job
-    /// to the spooler and returns; the network transmission happens afterwards.
-    /// Restoring Wi-Fi before that transmission finishes silently kills the job,
-    /// which is the whole reason Wi-Fi printing appeared to "do nothing".
-    static func waitForPrintJobsToClear(minHoldSeconds: Double = 1.5, timeoutSeconds: Double = 45.0) async {
+    /// True when every job that appeared AFTER `baseline` has left the CUPS
+    /// queue — i.e. this print's own jobs were delivered (or the printer was
+    /// reachable without switching). Scoping to new jobs keeps a stuck job
+    /// on some other printer from forcing a switch-and-45s-hold on every
+    /// print, and keeps pre-existing jobs from ever reading as "ours".
+    /// Requires two consecutive clear reads so a job that hasn't hit the
+    /// queue yet isn't mistaken for a delivered one.
+    static func newJobsCleared(
+        baseline: Set<String>,
+        minHoldSeconds: Double = 1.5,
+        timeoutSeconds: Double
+    ) async -> Bool {
         // Always hold briefly so a job that hasn't been enqueued yet at the
-        // instant run() returns still gets a chance to appear in the queue.
+        // instant NSPrintOperation.run() returns still gets a chance to
+        // appear in the queue.
         let minHold = UInt64(max(0, minHoldSeconds) * 1_000_000_000)
         if minHold > 0 {
             try? await Task.sleep(nanoseconds: minHold)
         }
-
         let deadline = Date().addingTimeInterval(timeoutSeconds)
-        // Require the queue to read empty twice in a row to avoid restoring in a
-        // gap between two jobs on a multi-slot print.
-        var consecutiveEmpty = 0
+        var consecutiveClear = 0
         while Date() < deadline {
-            if pendingPrintJobCount() == 0 {
-                consecutiveEmpty += 1
-                if consecutiveEmpty >= 2 { return }
+            if let current = pendingJobIDs() {
+                if current.subtracting(baseline).isEmpty {
+                    consecutiveClear += 1
+                    if consecutiveClear >= 2 { return true }
+                } else {
+                    consecutiveClear = 0
+                }
             } else {
-                consecutiveEmpty = 0
+                consecutiveClear = 0
             }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
+        return false
+    }
+
+    /// Re-enables CUPS destinations that stopped after delivery failures.
+    /// The default `printer-error-policy` is stop-printer, so a job spooled
+    /// while the printer was unreachable can stop the whole queue — joining
+    /// the printer's Wi-Fi afterwards then does nothing until the queue is
+    /// resumed. Best-effort: cupsenable may be denied without admin rights.
+    static func resumeStoppedPrinters() {
+        guard let output = try? run("/usr/bin/lpstat", ["-p"]) else { return }
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            // run() forces LANG=C, so the marker is stable English.
+            guard trimmed.hasPrefix("printer "), trimmed.contains(" disabled") else { continue }
+            let name = trimmed.dropFirst("printer ".count).components(separatedBy: .whitespaces).first
+            if let name, !name.isEmpty {
+                _ = try? run("/usr/sbin/cupsenable", [name])
+            }
+        }
+    }
+
+    /// Drops the printer association and lets macOS auto-join its own
+    /// remembered network — the same recovery the Wi-Fi menu provides.
+    /// Used when the direct rejoin fails or no restore target is known.
+    static func autoJoinFallback(printerSSID: String, timeoutSeconds: Double = 25.0) async throws {
+        guard let interface = CWWiFiClient.shared().interface() else {
+            throw WiFiAutomationError.missingWiFiDevice
+        }
+        let device = wifiDevice()
+        let previousIPv4 = device.flatMap { ipv4Address(device: $0) }
+        interface.disassociate()
+        // Give the interface a beat to actually drop the old lease before
+        // polling, so a stale address can't read as a rejoin.
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            // With Location granted the SSID is readable and is the direct
+            // proof; a fresh non-printer lease is the redacted-system proxy.
+            if let ssid = CWWiFiClient.shared().interface()?.ssid(), !ssid.isEmpty, ssid != printerSSID {
+                return
+            }
+            if let device, let ip = ipv4Address(device: device), ip != previousIPv4 {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        throw WiFiAutomationError.connectionTimeout(
+            "Wi-Fi did not rejoin a network after printing — pick one from the Wi-Fi menu."
+        )
     }
 
     static func prepare(settings: PrintAutomationSettings) async throws -> WiFiPrintSession? {
@@ -222,8 +372,13 @@ enum WiFiPrintAutomation {
         // Capture the network we're leaving before switching. currentSSID() can
         // transiently return nil, which would later strand the user on the
         // printer network with no way back — retry a few times to be sure.
+        // Skip the retries when reads cannot succeed: on macOS 15+ every
+        // path is redacted unless the user granted Location Services, and
+        // retrying a hopeless read just added ~1s to every print. A nil
+        // capture is survivable either way — restore falls back to
+        // restoreSSID / preferred networks / system auto-join.
         var previousSSID = currentSSID(service: settings.wifiService)
-        if previousSSID == nil {
+        if previousSSID == nil, !systemRedactsSSID || LocationPermission.shared.isAuthorized {
             for _ in 0..<3 {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 if let ssid = currentSSID(service: settings.wifiService) {
@@ -249,13 +404,57 @@ enum WiFiPrintAutomation {
     }
 
     static func connect(service: String, ssid: String, password: String?) throws {
+        // CoreWLAN first: it is the same join path the Wi-Fi menu uses, and
+        // on macOS 26 it is the only one that works — `networksetup
+        // -setairportnetwork` fails with "Could not find network" / -3900
+        // even for a broadcasting network it should know (verified live
+        // against the HP DIRECT SoftAP). The CLI stays as a fallback for
+        // older systems where CoreWLAN might be denied.
+        var coreWLANFailure: Error?
+        do {
+            try coreWLANJoin(ssid: ssid, password: password)
+            return
+        } catch {
+            coreWLANFailure = error
+        }
+
         var arguments = ["-setairportnetwork", service, ssid]
         if let password, !password.isEmpty {
             arguments.append(password)
         }
-        let output = try run("/usr/sbin/networksetup", arguments, combineStderrOnSuccess: true)
-        if let failure = joinFailureMessage(output) {
-            throw WiFiAutomationError.commandFailed(failure)
+        do {
+            let output = try run("/usr/sbin/networksetup", arguments, combineStderrOnSuccess: true)
+            if let failure = joinFailureMessage(output) {
+                throw WiFiAutomationError.commandFailed(failure)
+            }
+        } catch {
+            // The CoreWLAN diagnostic is the actionable one (it can name the
+            // missing Location permission); prefer it over the CLI noise.
+            throw coreWLANFailure ?? error
+        }
+    }
+
+    private static func coreWLANJoin(ssid: String, password: String?) throws {
+        guard let interface = CWWiFiClient.shared().interface() else {
+            throw WiFiAutomationError.missingWiFiDevice
+        }
+        let networks = (try? interface.scanForNetworks(withName: ssid)) ?? []
+        guard let network = networks.first else {
+            throw WiFiAutomationError.commandFailed("Could not find network \(ssid) in a Wi-Fi scan. The printer may be off, asleep, or out of range.")
+        }
+        do {
+            let effectivePassword = (password?.isEmpty == false) ? password : nil
+            try interface.associate(to: network, password: effectivePassword)
+        } catch {
+            if network.ssid == nil {
+                // The scan found the network but macOS redacted it — the
+                // telltale of missing Location Services access, which also
+                // makes associate() fail with -3900 tmpErr.
+                throw WiFiAutomationError.commandFailed(
+                    "macOS blocked the Wi-Fi switch. Allow Location Services for iLabel2Mac (System Settings → Privacy & Security → Location Services), then print again. (\(error.localizedDescription))"
+                )
+            }
+            throw WiFiAutomationError.commandFailed("Joining \(ssid) failed: \(error.localizedDescription)")
         }
     }
 
@@ -318,6 +517,10 @@ enum WiFiPrintAutomation {
         var ssidReadable = false
         var sameLeaseSince: Date?
         while Date() < deadline {
+            // currentSSID is cheap here: the CoreWLAN read is in-process,
+            // and on macOS 15+ the slow CLI fallbacks are short-circuited.
+            // With Location Services granted it verifies the exact SSID even
+            // on redacted systems; without it, the DHCP branch below decides.
             if let ssid = currentSSID(service: service) {
                 ssidReadable = true
                 if ssid == expectedSSID {
@@ -385,6 +588,13 @@ enum WiFiPrintAutomation {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
+        // Force the C locale so output parsers (lpstat "disabled" lines,
+        // networksetup failure markers) see stable English regardless of the
+        // user's system language (lpstat is localized — Korean by default
+        // on this machine).
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["LANG": "C", "LC_ALL": "C"]
+        ) { _, new in new }
 
         let stdout = Pipe()
         let stderr = Pipe()

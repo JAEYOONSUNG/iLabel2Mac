@@ -421,6 +421,36 @@ struct PrintAutomationSettings: Codable, Hashable {
         settleSeconds: 2.0,
         restoreSSID: nil
     )
+
+    var isConfigured: Bool {
+        !printerSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// First-launch default. When the Mac's preferred-network list already
+    /// contains a printer-looking SSID, the machine has joined that printer
+    /// before — its password is in the keychain, so a passwordless join works
+    /// (the restore path relies on the same fact). That makes it safe to ship
+    /// with switching enabled out of the box.
+    static func seededDefault(detectedPrinterSSID: String?) -> PrintAutomationSettings {
+        var settings = PrintAutomationSettings.default
+        if let ssid = detectedPrinterSSID?.trimmingCharacters(in: .whitespacesAndNewlines), !ssid.isEmpty {
+            settings.printerSSID = ssid
+            settings.enabled = true
+        }
+        return settings
+    }
+
+    /// Wi-Fi print setup is machine-local, not document content: a project
+    /// file saved earlier (or on another Mac) must not revert this machine's
+    /// printer SSID/password or the "Switch Wi-Fi on Print" checkbox when
+    /// opened. The document's own settings only apply when this machine has
+    /// nothing configured yet (e.g. a colleague's file seeding a new Mac).
+    static func resolvedOnOpen(
+        machineCached: PrintAutomationSettings,
+        documentValue: PrintAutomationSettings
+    ) -> PrintAutomationSettings {
+        machineCached.isConfigured ? machineCached : documentValue
+    }
 }
 
 struct PlacementSettings: Codable, Hashable {

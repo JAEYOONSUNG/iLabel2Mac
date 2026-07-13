@@ -66,6 +66,9 @@ final class DocumentStore: ObservableObject {
     private var lastUndoTime = Date.distantPast
     private let undoCoalescingInterval: TimeInterval = 1.0
     private let maxUndoDepth = 80
+    // Serializes Wi-Fi print transactions: a second print must wait for the
+    // first one's switch → transmit → restore cycle to finish.
+    private var wifiAutomationTask: Task<Void, Never>?
 
     init() {
         officialFormats = OfficialFormatCatalog.load()
@@ -634,6 +637,14 @@ final class DocumentStore: ObservableObject {
             loaded.embeddedFonts = nil
             document = loaded
             document.clampElementsToSheet()
+            // Wi-Fi print setup follows the machine, not the file — opening
+            // an old project must not flip off "Switch Wi-Fi on Print" or
+            // revert the printer credentials configured on this Mac.
+            document.printAutomation = PrintAutomationSettings.resolvedOnOpen(
+                machineCached: loadCachedPrintAutomation(),
+                documentValue: document.printAutomation
+            )
+            persistPrintAutomationCache(document.printAutomation)
             projectURL = url
             selectedElementID = document.elements.first?.id
             editingElementID = nil
@@ -774,74 +785,115 @@ final class DocumentStore: ObservableObject {
         let pageIndex = currentPageIndex
         let settings = document.printAutomation
 
-        Task {
-            do {
+        // The dialog runs on the user's normal network; the printer's Wi-Fi
+        // is only needed for the transmission itself. So: submit first, then
+        // check whether the job drains where we are (printer on the same
+        // LAN), and only switch — for as short a window as possible — when
+        // it doesn't. A failed switch leaves the job queued in CUPS; it
+        // prints whenever the printer becomes reachable.
+        //
+        // Chained on the previous run: two rapid prints must not interleave
+        // (one restoring the network while the other is still transmitting).
+        let previousRun = wifiAutomationTask
+        wifiAutomationTask = Task {
+            await previousRun?.value
+
+            // Jobs already in the queue are not ours; only what appears
+            // after this dialog counts as this print's delivery.
+            let baselineJobs = WiFiPrintAutomation.pendingJobIDs() ?? []
+
+            let didSubmit = await MainActor.run {
+                PageRenderer.print(document: snapshot, pageIndex: pageIndex)
+            }
+
+            guard didSubmit else {
                 await MainActor.run {
-                    if settings.enabled {
-                        wifiTestStatus = "Connecting to \(settings.printerSSID)..."
-                        statusMessage = "Connecting to printer Wi-Fi..."
-                    } else {
-                        wifiTestStatus = "Wi-Fi print disabled"
-                    }
+                    statusMessage = "Print cancelled"
+                    wifiTestStatus = settings.enabled ? "Print cancelled — Wi-Fi untouched" : "Wi-Fi print disabled"
                 }
+                return
+            }
 
-                let session = try await WiFiPrintAutomation.prepare(settings: settings)
-                if session != nil {
-                    await MainActor.run {
-                        refreshCurrentWiFiSSID()
-                        wifiTestStatus = "Connected to \(currentWiFiSSID)"
-                        statusMessage = "Connected to printer Wi-Fi"
-                    }
-                    let nanoseconds = UInt64(max(0, settings.settleSeconds) * 1_000_000_000)
-                    if nanoseconds > 0 {
-                        try? await Task.sleep(nanoseconds: nanoseconds)
-                    }
+            guard settings.enabled else {
+                await MainActor.run {
+                    refreshCurrentWiFiSSID()
+                    wifiTestStatus = "Printed without Wi-Fi switching"
+                    statusMessage = "Sent page \(pageIndex + 1) to print dialog"
                 }
+                return
+            }
 
-                let didSubmit = await MainActor.run {
-                    PageRenderer.print(document: snapshot, pageIndex: pageIndex)
+            await MainActor.run {
+                wifiTestStatus = "Sending job..."
+                statusMessage = "Checking if the printer is reachable without switching..."
+            }
+            if await WiFiPrintAutomation.newJobsCleared(baseline: baselineJobs, timeoutSeconds: 4.0) {
+                await MainActor.run {
+                    refreshCurrentWiFiSSID()
+                    wifiTestStatus = "Printed without switching (printer reachable directly)"
+                    statusMessage = "Printed page \(pageIndex + 1) — no Wi-Fi switch needed"
                 }
+                return
+            }
 
-                if let session {
-                    // Only hold the printer connection open if a job was actually
-                    // submitted. If the user cancelled the print panel there is
-                    // nothing to drain, so restore immediately.
-                    if didSubmit {
-                        await MainActor.run {
-                            wifiTestStatus = "Sending job to printer..."
-                            statusMessage = "Waiting for the print job to reach the printer..."
-                        }
-                        // Critical: NSPrintOperation.run() only spools the job;
-                        // CUPS transmits it over Wi-Fi afterwards. Restoring the
-                        // network now would abort that transfer, so wait for the
-                        // queue to drain first.
-                        await WiFiPrintAutomation.waitForPrintJobsToClear()
-                    }
-
-                    await MainActor.run {
-                        wifiTestStatus = "Restoring previous Wi-Fi..."
-                        statusMessage = "Restoring previous Wi-Fi..."
-                    }
-                    try? await session.restore()
-                    await MainActor.run {
-                        refreshCurrentWiFiSSID()
-                        wifiTestStatus = "Restored to \(currentWiFiSSID)"
-                        statusMessage = didSubmit
-                            ? "Printed, then returned to previous Wi-Fi"
-                            : "Print cancelled; returned to previous Wi-Fi"
-                    }
-                } else {
-                    await MainActor.run {
-                        refreshCurrentWiFiSSID()
-                        wifiTestStatus = "Printed without Wi-Fi switching"
-                        statusMessage = "Sent page \(pageIndex + 1) to print dialog"
-                    }
-                }
+            await MainActor.run {
+                wifiTestStatus = "Connecting to \(settings.printerSSID)..."
+                statusMessage = "Connecting to printer Wi-Fi to deliver the job..."
+            }
+            let session: WiFiPrintSession?
+            do {
+                session = try await WiFiPrintAutomation.prepare(settings: settings)
             } catch {
                 await MainActor.run {
                     refreshCurrentWiFiSSID()
-                    wifiTestStatus = "Print Wi-Fi failed: \(error.localizedDescription)"
-                    statusMessage = "Print automation failed: \(error.localizedDescription)"
+                    wifiTestStatus = "Wi-Fi switch failed: \(error.localizedDescription)"
+                    statusMessage = "Job stays queued — it prints when the printer is reachable"
+                }
+                return
+            }
+
+            if session != nil {
+                let nanoseconds = UInt64(max(0, settings.settleSeconds) * 1_000_000_000)
+                if nanoseconds > 0 {
+                    try? await Task.sleep(nanoseconds: nanoseconds)
+                }
+                // A queue that stopped while the printer was unreachable
+                // (default error policy is stop-printer) won't resume just
+                // because the network is right now — kick it back on.
+                WiFiPrintAutomation.resumeStoppedPrinters()
+            }
+
+            await MainActor.run {
+                wifiTestStatus = "Sending job to printer..."
+                statusMessage = "Waiting for the print job to reach the printer..."
+            }
+            // Critical: restoring the network mid-transfer aborts the job,
+            // so wait for this print's own jobs to leave the queue first.
+            let delivered = await WiFiPrintAutomation.newJobsCleared(
+                baseline: baselineJobs,
+                timeoutSeconds: 45.0
+            )
+
+            if let session {
+                await MainActor.run {
+                    wifiTestStatus = "Restoring previous Wi-Fi..."
+                    statusMessage = "Restoring previous Wi-Fi..."
+                }
+                do {
+                    try await session.restore()
+                    await MainActor.run {
+                        refreshCurrentWiFiSSID()
+                        wifiTestStatus = "Restored to \(currentWiFiSSID)"
+                        statusMessage = delivered
+                            ? "Printed, then returned to previous Wi-Fi"
+                            : "Returned to previous Wi-Fi — the job hadn't finished sending; check the printer"
+                    }
+                } catch {
+                    await MainActor.run {
+                        refreshCurrentWiFiSSID()
+                        wifiTestStatus = "Restore failed: \(error.localizedDescription)"
+                        statusMessage = "Printed, but couldn't rejoin the previous Wi-Fi — pick it from the Wi-Fi menu"
+                    }
                 }
             }
         }
@@ -904,13 +956,18 @@ final class DocumentStore: ObservableObject {
     }
 
     private func loadCachedPrintAutomation() -> PrintAutomationSettings {
-        guard
-            let data = UserDefaults.standard.data(forKey: cachedPrintAutomationKey),
-            let settings = try? JSONDecoder().decode(PrintAutomationSettings.self, from: data)
-        else {
-            return .default
+        if let data = UserDefaults.standard.data(forKey: cachedPrintAutomationKey),
+           let settings = try? JSONDecoder().decode(PrintAutomationSettings.self, from: data) {
+            return settings
         }
-        return settings
+        // First launch on this machine: pre-fill from the Wi-Fi networks the
+        // Mac already knows and persist immediately, so the seed (and its
+        // process-spawning auto-detection) runs exactly once.
+        let seeded = PrintAutomationSettings.seededDefault(
+            detectedPrinterSSID: WiFiPrintAutomation.autoDetectedPrinterSSID()
+        )
+        persistPrintAutomationCache(seeded)
+        return seeded
     }
 
     private func persistPrintAutomationCache(_ settings: PrintAutomationSettings) {
@@ -944,6 +1001,13 @@ final class DocumentStore: ObservableObject {
     private func refreshCurrentWiFiSSID() {
         // macOS 15+ redacts the SSID from every CLI without Location Services,
         // so "Unknown" here is expected on modern systems, not an error.
+        // Probing spawns networksetup on the main thread (~100-300ms stall),
+        // and printCurrentPage refreshes this label several times per print —
+        // on a redacted system it can never return anything, so skip it.
+        if WiFiPrintAutomation.systemRedactsSSID {
+            currentWiFiSSID = "Unknown (hidden by macOS)"
+            return
+        }
         currentWiFiSSID = WiFiPrintAutomation.currentSSID(service: document.printAutomation.wifiService) ?? "Unknown (hidden by macOS)"
     }
 
