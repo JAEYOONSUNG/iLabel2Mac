@@ -19,6 +19,8 @@ Open the DMG, drag `iLabel2Mac.app` to `Applications`, then launch it.
 - Text, shape, image, QR, and Code128 elements
 - CSV merge tokens using `{{Column}}`
 - Serial tokens using `{{serial}}`
+- Capture queue that locks artwork, Numbering/CSV setup, page, and start position, then prints every capture in one multi-page job
+- Full-circle text flow with chord-shaped lines and matching editor, preview, PDF, and print layout
 - Page preview with per-slot merge rendering
 - JSON project save/load
 - PDF, PNG, and print output for the current page

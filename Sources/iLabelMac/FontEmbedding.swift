@@ -26,7 +26,9 @@ enum FontEmbedder {
             )
         }
 
-        for element in document.elements where element.type == .text {
+        let allElements = document.elements
+            + document.printBatches.flatMap(\.elements)
+        for element in allElements where element.type == .text {
             consider(resolvedNSFont(
                 name: element.fontName,
                 size: 12,

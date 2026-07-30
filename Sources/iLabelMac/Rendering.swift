@@ -110,7 +110,9 @@ enum TextLayoutRenderer {
                 .underlineStyle: element.isUnderline ? NSUnderlineStyle.single.rawValue : 0
             ]
             let text = displayString(for: element, context: context, serialSettings: serialSettings)
-            return NSAttributedString(string: text, attributes: attributes)
+            return trimmingTrailingLineBreaks(
+                from: NSAttributedString(string: text, attributes: attributes)
+            )
         }
 
         let pattern = #"\{\{\s*([^}]+?)\s*\}\}"#
@@ -142,10 +144,28 @@ enum TextLayoutRenderer {
                     }
                 }
             }
-            return vertical
+            return trimmingTrailingLineBreaks(from: vertical)
         }
 
-        return base
+        return trimmingTrailingLineBreaks(from: base)
+    }
+
+    /// A final CR/LF creates an extra empty layout fragment and shifts the
+    /// visible block upward when it is vertically centered. Keep the document
+    /// content untouched and remove only those terminal line breaks from the
+    /// attributed value used for layout and drawing.
+    private static func trimmingTrailingLineBreaks(
+        from attributed: NSAttributedString
+    ) -> NSAttributedString {
+        let string = attributed.string as NSString
+        var length = string.length
+        while length > 0 {
+            let codeUnit = string.character(at: length - 1)
+            guard codeUnit == 0x0A || codeUnit == 0x0D else { break }
+            length -= 1
+        }
+        guard length != attributed.length else { return attributed }
+        return attributed.attributedSubstring(from: NSRange(location: 0, length: length))
     }
 
     private static func normalizedRichText(
@@ -188,6 +208,223 @@ enum TextLayoutRenderer {
         }
         mutable.endEditing()
         return mutable
+    }
+}
+
+struct CircularTextLayoutResult {
+    let textStorage: NSTextStorage
+    let layoutManager: NSLayoutManager
+    let textContainer: NSTextContainer
+
+    var glyphRange: NSRange {
+        layoutManager.glyphRange(for: textContainer)
+    }
+
+    var usedRect: CGRect {
+        let range = glyphRange
+        guard range.length > 0 else { return .zero }
+        return layoutManager.boundingRect(forGlyphRange: range, in: textContainer)
+    }
+
+    var lineFragmentRects: [CGRect] {
+        let range = glyphRange
+        guard range.length > 0 else { return [] }
+        var fragments: [CGRect] = []
+        layoutManager.enumerateLineFragments(forGlyphRange: range) {
+            rect,
+            _,
+            _,
+            _,
+            _ in
+            fragments.append(rect)
+        }
+        return fragments
+    }
+}
+
+/// TextKit's exclusion paths give every line the ellipse chord available at
+/// its vertical position. The same layout object drives the canvas preview and
+/// vector PDF output; the inline editor reuses `configureCenteredLayout`.
+enum CircularTextLayoutRenderer {
+    static func makeLayout(
+        attributed: NSAttributedString,
+        size: CGSize,
+        insets: CGSize
+    ) -> CircularTextLayoutResult {
+        let storage = NSTextStorage(attributedString: attributed)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(containerSize: size)
+        textContainer.lineFragmentPadding = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        layoutManager.usesFontLeading = true
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+
+        configureCenteredLayout(
+            layoutManager: layoutManager,
+            textContainer: textContainer,
+            size: size,
+            insets: insets
+        )
+        return CircularTextLayoutResult(
+            textStorage: storage,
+            layoutManager: layoutManager,
+            textContainer: textContainer
+        )
+    }
+
+    @discardableResult
+    static func configureCenteredLayout(
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer,
+        size: CGSize,
+        insets: CGSize,
+        initialTopInset: CGFloat? = nil
+    ) -> CGFloat {
+        guard size.width > 1, size.height > 1 else { return 0 }
+        textContainer.containerSize = size
+
+        let textStorage = layoutManager.textStorage
+        let textLength = textStorage?.length ?? 0
+        let constraint = CGSize(
+            width: max(1, size.width - (2 * insets.width)),
+            height: .greatestFiniteMagnitude
+        )
+        let measuredHeight = textStorage?.boundingRect(
+            with: constraint,
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        ).height ?? 0
+        var topInset = initialTopInset
+            ?? max(0, (size.height - min(size.height, ceil(measuredHeight) + 1)) / 2)
+
+        for _ in 0..<8 {
+            applyExclusionPaths(
+                to: textContainer,
+                size: size,
+                insets: insets,
+                topInset: topInset
+            )
+            if textLength > 0 {
+                layoutManager.invalidateLayout(
+                    forCharacterRange: NSRange(location: 0, length: textLength),
+                    actualCharacterRange: nil
+                )
+            }
+            layoutManager.ensureLayout(for: textContainer)
+            let glyphRange = layoutManager.glyphRange(for: textContainer)
+            guard glyphRange.length > 0 else {
+                if topInset > 0.5 {
+                    topInset = 0
+                    continue
+                }
+                break
+            }
+
+            let used = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            )
+            let correction = (size.height / 2) - used.midY
+            guard abs(correction) > 0.25 else { break }
+            let next = min(max(0, topInset + correction), max(0, size.height - 1))
+            guard abs(next - topInset) > 0.1 else { break }
+            topInset = next
+        }
+
+        applyExclusionPaths(
+            to: textContainer,
+            size: size,
+            insets: insets,
+            topInset: topInset
+        )
+        if textLength > 0 {
+            layoutManager.invalidateLayout(
+                forCharacterRange: NSRange(location: 0, length: textLength),
+                actualCharacterRange: nil
+            )
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        return topInset
+    }
+
+    static func exclusionPaths(
+        size: CGSize,
+        insets: CGSize,
+        topInset: CGFloat
+    ) -> [NSBezierPath] {
+        let bounds = CGRect(origin: .zero, size: size)
+        let insetX = min(max(0, insets.width), max(0, (size.width / 2) - 0.5))
+        let insetY = min(max(0, insets.height), max(0, (size.height / 2) - 0.5))
+        let ellipseRect = bounds.insetBy(dx: insetX, dy: insetY)
+
+        let outsideEllipse = NSBezierPath(rect: bounds)
+        outsideEllipse.appendOval(in: ellipseRect)
+        outsideEllipse.windingRule = .evenOdd
+
+        var paths = [outsideEllipse]
+        let blockedHeight = min(max(0, topInset), max(0, size.height - 0.5))
+        if blockedHeight > 0.1 {
+            paths.append(
+                NSBezierPath(
+                    rect: CGRect(
+                        x: 0,
+                        y: 0,
+                        width: size.width,
+                        height: blockedHeight
+                    )
+                )
+            )
+        }
+        return paths
+    }
+
+    static func draw(
+        attributed: NSAttributedString,
+        in rect: CGRect,
+        context: CGContext,
+        insets: CGSize
+    ) {
+        guard attributed.length > 0, rect.width > 1, rect.height > 1 else { return }
+        let layout = makeLayout(
+            attributed: attributed,
+            size: rect.size,
+            insets: insets
+        )
+        let glyphRange = layout.glyphRange
+        guard glyphRange.length > 0 else { return }
+
+        context.saveGState()
+        // TextKit uses a top-left layout coordinate system. Flip only inside
+        // the element so the surrounding PDF remains in its normal y-up space.
+        context.translateBy(x: rect.minX, y: rect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        layout.layoutManager.drawBackground(
+            forGlyphRange: glyphRange,
+            at: .zero
+        )
+        layout.layoutManager.drawGlyphs(
+            forGlyphRange: glyphRange,
+            at: .zero
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        context.restoreGState()
+    }
+
+    private static func applyExclusionPaths(
+        to textContainer: NSTextContainer,
+        size: CGSize,
+        insets: CGSize,
+        topInset: CGFloat
+    ) {
+        textContainer.exclusionPaths = exclusionPaths(
+            size: size,
+            insets: insets,
+            topInset: topInset
+        )
     }
 }
 
@@ -321,7 +558,9 @@ enum PageRenderer {
     }
 
     static func pdfData(document: LabelDocument, pageIndex: Int) -> Data {
-        if let vector = directPDFData(document: document, pageIndex: pageIndex), vector.count > 2048 {
+        if let vector = directPDFData(document: document, pageIndex: pageIndex),
+           let pdf = PDFDocument(data: vector),
+           pdf.pageCount > 0 {
             return vector
         }
         return imageBackedPDFData(document: document, pageIndex: pageIndex) ?? Data()
@@ -359,30 +598,12 @@ enum PageRenderer {
 
     @discardableResult
     static func print(document: LabelDocument, pageIndex: Int) -> Bool {
-        let printSize = pageSize(document: document)
-        let info = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo.shared
-        info.topMargin = 0
-        info.bottomMargin = 0
-        info.leftMargin = 0
-        info.rightMargin = 0
-        info.horizontalPagination = .fit
-        info.verticalPagination = .fit
-        info.paperSize = printSize
-
-        if let pdfURL = writeTemporaryPrintPDF(document: document, pageIndex: pageIndex),
-           let pdfDocument = PDFDocument(url: pdfURL),
-           let operation = pdfDocument.printOperation(
-            for: info,
-            scalingMode: PDFPrintScalingMode(rawValue: 0)!,
-            autoRotate: false
-           ) {
-            NSApp.activate(ignoringOtherApps: true)
-            operation.jobTitle = document.title
-            operation.showsPrintPanel = true
-            operation.showsProgressPanel = true
-            return operation.run()
+        let data = pdfData(document: document, pageIndex: pageIndex)
+        if let result = runPrintOperation(document: document, pdfData: data) {
+            return result
         }
 
+        let printSize = pageSize(document: document)
         let fallbackView: NSView
         if let image = renderedImage(document: document, pageIndex: pageIndex) {
             fallbackView = printableImageView(image: image, size: printSize)
@@ -390,7 +611,57 @@ enum PageRenderer {
             fallbackView = hostingView(document: document, pageIndex: pageIndex)
         }
 
-        let operation = NSPrintOperation(view: fallbackView, printInfo: info)
+        let operation = NSPrintOperation(
+            view: fallbackView,
+            printInfo: configuredPrintInfo(document: document)
+        )
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        return operation.run()
+    }
+
+    /// Submits the complete multi-page PDF through one PDFKit print operation,
+    /// so every queued label is part of a single macOS/CUPS print job.
+    @discardableResult
+    static func printAllPages(document: LabelDocument) -> Bool {
+        runPrintOperation(
+            document: document,
+            pdfData: pdfDataAllPages(document: document)
+        ) ?? false
+    }
+
+    private static func configuredPrintInfo(document: LabelDocument) -> NSPrintInfo {
+        let info = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo.shared
+        info.topMargin = 0
+        info.bottomMargin = 0
+        info.leftMargin = 0
+        info.rightMargin = 0
+        info.horizontalPagination = .fit
+        info.verticalPagination = .fit
+        info.paperSize = pageSize(document: document)
+        return info
+    }
+
+    /// Nil means the PDF could not be opened as a printable document. A Bool
+    /// is the actual result of the one print operation (including cancellation).
+    private static func runPrintOperation(
+        document: LabelDocument,
+        pdfData: Data
+    ) -> Bool? {
+        guard
+            let pdfDocument = PDFDocument(data: pdfData),
+            pdfDocument.pageCount > 0,
+            let operation = pdfDocument.printOperation(
+                for: configuredPrintInfo(document: document),
+                scalingMode: PDFPrintScalingMode(rawValue: 0)!,
+                autoRotate: false
+            )
+        else {
+            return nil
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        operation.jobTitle = document.title
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         return operation.run()
@@ -413,8 +684,8 @@ enum PageRenderer {
         for row in 0..<document.sheet.rows {
             for column in 0..<document.sheet.columns {
                 let slotIndex = row * document.sheet.columns + column
-                let mergeContext = document.mergeContext(slotIndex: slotIndex, pageIndex: pageIndex)
-                guard mergeContext.isActive || !document.hasFiniteMergeRows else { continue }
+                let payload = document.renderPayload(slotIndex: slotIndex, pageIndex: pageIndex)
+                guard payload.context.isActive || !document.hasFiniteMergeRows else { continue }
 
                 let slot = document.sheet.slotFrame(column: column, row: row)
                 let slotRect = CGRect(
@@ -427,13 +698,14 @@ enum PageRenderer {
                 context.saveGState()
                 clip(to: slotRect, shape: document.sheet.shape, radiusMM: document.sheet.cornerRadiusMM, in: context)
 
-                for element in document.elements {
+                for element in payload.elements {
                     draw(
                         element: element,
                         inSlotRect: slotRect,
+                        labelShape: document.sheet.shape,
                         context: context,
-                        mergeContext: mergeContext,
-                        serialSettings: document.serial
+                        mergeContext: payload.context,
+                        serialSettings: payload.serialSettings
                     )
                 }
 
@@ -539,6 +811,7 @@ enum PageRenderer {
     static func draw(
         element: LabelElement,
         inSlotRect slotRect: CGRect,
+        labelShape: LabelShape,
         context: CGContext,
         mergeContext: MergeContext,
         serialSettings: SerialSettings
@@ -559,7 +832,15 @@ enum PageRenderer {
 
         switch element.type {
         case .text:
-            drawText(element: element, rect: rect, context: context, mergeContext: mergeContext, serialSettings: serialSettings)
+            drawText(
+                element: element,
+                rect: rect,
+                context: context,
+                mergeContext: mergeContext,
+                serialSettings: serialSettings,
+                usesCircularFlow: labelShape == .circle
+                    && element.usesCircularTextFlow == true
+            )
         case .rectangle:
             drawRectangle(element: element, rect: rect, context: context)
         case .image:
@@ -576,9 +857,44 @@ enum PageRenderer {
         rect: CGRect,
         context: CGContext,
         mergeContext: MergeContext,
-        serialSettings: SerialSettings
+        serialSettings: SerialSettings,
+        usesCircularFlow: Bool = false
     ) {
+        let surfacePath: CGPath
+        if usesCircularFlow {
+            surfacePath = CGPath(ellipseIn: rect, transform: nil)
+        } else {
+            let radius = mmToPoints(element.cornerRadiusMM)
+            surfacePath = CGPath(
+                roundedRect: rect,
+                cornerWidth: radius,
+                cornerHeight: radius,
+                transform: nil
+            )
+        }
+        context.addPath(surfacePath)
+        context.setFillColor(element.background.nsColor.cgColor)
+        context.fillPath()
+        if element.strokeWidth > 0 {
+            context.addPath(surfacePath)
+            context.setStrokeColor(element.stroke.nsColor.cgColor)
+            context.setLineWidth(CGFloat(element.strokeWidth))
+            context.strokePath()
+        }
+
         let attributed = TextLayoutRenderer.attributedString(for: element, context: mergeContext, serialSettings: serialSettings)
+        if usesCircularFlow {
+            CircularTextLayoutRenderer.draw(
+                attributed: attributed,
+                in: rect,
+                context: context,
+                insets: CGSize(
+                    width: mmToPoints(textElementInsetXMM),
+                    height: mmToPoints(textElementInsetYMM)
+                )
+            )
+            return
+        }
         // Same mm insets as the on-screen surfaces (textElementInset*MM) so
         // line wrapping happens at the same characters in print as on screen.
         let insetRect = rect.insetBy(dx: mmToPoints(textElementInsetXMM), dy: mmToPoints(textElementInsetYMM))
@@ -586,11 +902,12 @@ enum PageRenderer {
             with: insetRect.size,
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         ).size
+        let drawHeight = min(insetRect.height, ceil(textSize.height) + 1)
         let drawRect = CGRect(
             x: insetRect.origin.x,
-            y: insetRect.origin.y + max(0, (insetRect.height - textSize.height) / 2),
+            y: insetRect.midY - (drawHeight / 2),
             width: insetRect.width,
-            height: min(insetRect.height, textSize.height + 1)
+            height: drawHeight
         )
 
         let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)

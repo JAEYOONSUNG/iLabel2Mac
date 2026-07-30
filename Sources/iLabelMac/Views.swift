@@ -192,7 +192,16 @@ struct ToolbarStrip: View {
                     .help("Export every page into one multi-page PDF")
                     .disabled(store.document.pageCount <= 1)
                 Button("PNG", action: store.exportPNG)
-                Button("Print", action: store.printCurrentPage)
+                Button(store.document.hasQueuedLabels ? "Print Captures" : "Print") {
+                    if store.document.hasQueuedLabels {
+                        store.printAllPages()
+                    } else {
+                        store.printCurrentPage()
+                    }
+                }
+                .help(store.document.hasQueuedLabels
+                    ? "Print every captured setup in one print job"
+                    : "Print the current page")
             }
 
             ToolbarSeparator()
@@ -234,13 +243,17 @@ struct ToolbarStrip: View {
                 Button("Prev") { store.movePage(delta: -1) }
                     .disabled(store.currentPageIndex == 0)
 
-                Text("Page \(store.currentPageIndex + 1) / \(store.document.pageCount)")
+                Text(
+                    store.isCaptureStagingPage
+                        ? "New Page \(store.currentPageIndex + 1)"
+                        : "Page \(store.currentPageIndex + 1) / \(store.document.pageCount)"
+                )
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 96)
+                    .frame(minWidth: 128)
 
                 Button("Next") { store.movePage(delta: 1) }
-                    .disabled(store.currentPageIndex >= store.document.pageCount - 1)
+                    .disabled(store.currentPageIndex >= store.navigationPageCount - 1)
             }
 
             Spacer(minLength: 20)
@@ -339,6 +352,7 @@ struct SidebarView: View {
                                 }
                             }
                         }
+                        .disabled(store.document.hasQueuedLabels)
                     }
                 }
 
@@ -351,6 +365,7 @@ struct SidebarView: View {
                     onApply: { store.applyOfficialFormat(code: $0) }
                 )
                 .equatable()
+                .disabled(store.document.hasQueuedLabels)
 
                 GroupBox("Sheet") {
                     VStack(alignment: .leading, spacing: 10) {
@@ -389,6 +404,17 @@ struct SidebarView: View {
                             }
                         }
                     }
+                }
+                .disabled(store.document.hasQueuedLabels)
+
+                if store.document.hasQueuedLabels {
+                    Label(
+                        "Reset Capture Queue to change the label format or sheet geometry.",
+                        systemImage: "lock.fill"
+                    )
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 GroupBox("Data") {
@@ -467,6 +493,160 @@ struct SidebarView: View {
             set: { newValue in
                 store.updateSheet { sheet in
                     sheet[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+}
+
+struct CompactNumberingSection: View {
+    @ObservedObject var store: DocumentStore
+
+    var body: some View {
+        GroupBox("Numbering") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Mode")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Picker("Mode", selection: serialModeBinding) {
+                            ForEach(SerialMode.allCases) { mode in
+                                Text(mode.label).tag(mode)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Fill Order")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Picker(
+                            "Fill Order",
+                            selection: fillDirectionBinding
+                        ) {
+                            ForEach(PlacementFillDirection.allCases) { direction in
+                                Text(direction.label).tag(direction)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8)
+                    ],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    CompactStepperField(
+                        title: "Start",
+                        value: serialIntBinding(\.start),
+                        range: 0...999_999
+                    )
+                    CompactStepperField(
+                        title: "Step",
+                        value: serialIntBinding(\.step),
+                        range: 1...999
+                    )
+                    if store.document.serial.mode == .rangedSets {
+                        CompactStepperField(
+                            title: "End",
+                            value: serialIntBinding(\.end),
+                            range: 0...999_999
+                        )
+                        CompactStepperField(
+                            title: "Repeat",
+                            value: serialIntBinding(\.repeatSets),
+                            range: 1...999
+                        )
+                    }
+                    CompactStepperField(
+                        title: "Digits",
+                        value: serialIntBinding(\.digits),
+                        range: 1...12
+                    )
+                }
+
+                HStack(spacing: 8) {
+                    TextField(
+                        "Prefix",
+                        text: serialStringBinding(\.prefix)
+                    )
+                    TextField(
+                        "Suffix",
+                        text: serialStringBinding(\.suffix)
+                    )
+                }
+                .controlSize(.small)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "number")
+                    if store.document.serial.mode == .rangedSets {
+                        Text(
+                            "\(store.document.serial.countPerSet) per set × \(max(1, store.document.serial.repeatSets)) = \(store.document.serial.totalGeneratedCount) labels"
+                        )
+                    } else {
+                        Text(
+                            "Continuous · \(store.document.currentSetupLabelCount) labels in selected area"
+                        )
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+        }
+        .help("Use {{serial}}, {{serial_raw}}, {{set}}, and {{index_in_set}} in label text.")
+    }
+
+    private var serialModeBinding: Binding<SerialMode> {
+        Binding(
+            get: { store.document.serial.mode },
+            set: { newValue in
+                store.updateDocument { document in
+                    document.serial.mode = newValue
+                }
+            }
+        )
+    }
+
+    private var fillDirectionBinding: Binding<PlacementFillDirection> {
+        Binding(
+            get: { store.document.placement.fillDirection },
+            set: { store.updatePlacementFillDirection($0) }
+        )
+    }
+
+    private func serialIntBinding(
+        _ keyPath: WritableKeyPath<SerialSettings, Int>
+    ) -> Binding<Int> {
+        Binding(
+            get: { store.document.serial[keyPath: keyPath] },
+            set: { newValue in
+                store.updateDocument { document in
+                    document.serial[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
+    private func serialStringBinding(
+        _ keyPath: WritableKeyPath<SerialSettings, String>
+    ) -> Binding<String> {
+        Binding(
+            get: { store.document.serial[keyPath: keyPath] },
+            set: { newValue in
+                store.updateDocument { document in
+                    document.serial[keyPath: keyPath] = newValue
                 }
             }
         )
@@ -573,8 +753,18 @@ struct InspectorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 0) {
+            CompactNumberingSection(store: store)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    PrintQueueSection(store: store)
+
                 if let selected = store.selectedElement {
                     GroupBox("Selected Object") {
                         VStack(alignment: .leading, spacing: 10) {
@@ -663,6 +853,19 @@ struct InspectorView: View {
 
                             NumberRow(title: "Rotation", value: selectedBinding(\.rotation, defaultValue: 0), suffix: "deg")
                             NumberRow(title: "Opacity", value: selectedBinding(\.opacity, defaultValue: 1))
+
+                            if selected.type == .text {
+                                Button {
+                                    store.fitSelectedTextToLabel()
+                                } label: {
+                                    Label(
+                                        store.document.sheet.shape == .circle ? "Fit Text to Circle" : "Center in Label",
+                                        systemImage: "scope"
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+                                .help("Center the text box and keep it inside the label boundary")
+                            }
                         }
                     }
 
@@ -758,58 +961,15 @@ struct InspectorView: View {
                     }
                 }
 
-                GroupBox("Numbering + Notes") {
+                GroupBox("Project Notes") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Picker("Fill Order", selection: placementBinding(\.fillDirection)) {
-                            ForEach(PlacementFillDirection.allCases) { direction in
-                                Text(direction.label).tag(direction)
-                            }
-                        }
-
-                        Picker("Mode", selection: serialBinding(\.mode)) {
-                            ForEach(SerialMode.allCases) { mode in
-                                Text(mode.label).tag(mode)
-                            }
-                        }
-
-                        StepperField(title: "Start", value: serialBinding(\.start), range: 0...999_999)
-                        StepperField(title: "Step", value: serialBinding(\.step), range: 1...999)
-                        if store.document.serial.mode == .rangedSets {
-                            StepperField(title: "End", value: serialBinding(\.end), range: 0...999_999)
-                            StepperField(title: "Repeat Sets", value: serialBinding(\.repeatSets), range: 1...999)
-                        }
-                        StepperField(title: "Digits", value: serialBinding(\.digits), range: 1...12)
-
-                        HStack(spacing: 8) {
-                            TextField("Prefix", text: serialStringBinding(\.prefix))
-                            TextField("Suffix", text: serialStringBinding(\.suffix))
-                        }
-
-                        if store.document.serial.mode == .rangedSets {
-                            Text("Labels: \(store.document.serial.countPerSet) per set · \(store.document.serial.repeatSets) set(s) · total \(store.document.serial.totalGeneratedCount)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            Text("Use {{serial}}, {{serial_raw}}, {{set}}, {{index_in_set}}")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Use {{serial}} for continuous numbering")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Project Notes")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            TextEditor(text: documentBinding(\.notes))
-                                .font(.system(size: 12))
-                                .frame(height: 88)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                                )
-                        }
+                        TextEditor(text: documentBinding(\.notes))
+                            .font(.system(size: 12))
+                            .frame(height: 88)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                            )
                     }
                 }
 
@@ -878,8 +1038,9 @@ struct InspectorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                }
+                .padding(14)
             }
-            .padding(14)
         }
         .background(appPanelBackground())
     }
@@ -890,39 +1051,6 @@ struct InspectorView: View {
             set: { newValue in
                 store.updateDocument { document in
                     document[keyPath: keyPath] = newValue
-                }
-            }
-        )
-    }
-
-    private func serialBinding(_ keyPath: WritableKeyPath<SerialSettings, Int>) -> Binding<Int> {
-        Binding(
-            get: { store.document.serial[keyPath: keyPath] },
-            set: { newValue in
-                store.updateDocument { document in
-                    document.serial[keyPath: keyPath] = newValue
-                }
-            }
-        )
-    }
-
-    private func serialBinding(_ keyPath: WritableKeyPath<SerialSettings, SerialMode>) -> Binding<SerialMode> {
-        Binding(
-            get: { store.document.serial[keyPath: keyPath] },
-            set: { newValue in
-                store.updateDocument { document in
-                    document.serial[keyPath: keyPath] = newValue
-                }
-            }
-        )
-    }
-
-    private func serialStringBinding(_ keyPath: WritableKeyPath<SerialSettings, String>) -> Binding<String> {
-        Binding(
-            get: { store.document.serial[keyPath: keyPath] },
-            set: { newValue in
-                store.updateDocument { document in
-                    document.serial[keyPath: keyPath] = newValue
                 }
             }
         )
@@ -945,17 +1073,6 @@ struct InspectorView: View {
             set: { newColor in
                 store.updateSelected { element in
                     element[keyPath: keyPath] = RGBAColor(newColor)
-                }
-            }
-        )
-    }
-
-    private func placementBinding(_ keyPath: WritableKeyPath<PlacementSettings, PlacementFillDirection>) -> Binding<PlacementFillDirection> {
-        Binding(
-            get: { store.document.placement[keyPath: keyPath] },
-            set: { newValue in
-                store.updateDocument { document in
-                    document.placement[keyPath: keyPath] = newValue
                 }
             }
         )
@@ -992,6 +1109,169 @@ struct InspectorView: View {
                 }
             }
         )
+    }
+}
+
+struct PrintQueueSection: View {
+    @ObservedObject var store: DocumentStore
+
+    private var batches: [PrintBatch] {
+        store.document.printBatches
+    }
+
+    var body: some View {
+        GroupBox("Capture Queue") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Each capture locks its label, Numbering/CSV setup, page, and start position. Changing the sheet start area only affects the next capture.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Text("Current setup")
+                    Spacer()
+                    Text("\(store.document.currentSetupLabelCount) label(s)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .font(.system(size: 11, weight: .semibold))
+
+                Button {
+                    store.enqueueCurrentLabel()
+                } label: {
+                    Label("Capture Current Setup", systemImage: "camera.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!store.canCaptureCurrentLabel)
+
+                if let issue = store.captureQueueIssue
+                    ?? store.pendingDraftIssueMessage {
+                    Text(issue)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if store.document.hasQueuedLabels,
+                          store.pendingDraftPageIndex == nil {
+                    Text("Click an empty label position to stage the next capture.")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if batches.isEmpty {
+                    Text("No captured setups yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                } else {
+                    HStack {
+                        Text("\(store.document.queuedLabelCount) label(s)")
+                        Spacer()
+                        Text("\(store.document.pageCount) page(s)")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                    ScrollView {
+                        LazyVStack(spacing: 7) {
+                            ForEach(Array(batches.enumerated()), id: \.element.id) { indexedBatch in
+                                let index = indexedBatch.offset
+                                let batch = indexedBatch.element
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack(spacing: 8) {
+                                        Text("\(index + 1)")
+                                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.white)
+                                            .frame(width: 20, height: 20)
+                                            .background(Circle().fill(Color.accentColor))
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(batch.name)
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .lineLimit(2)
+                                            Text(captureSummary(for: batch))
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Spacer(minLength: 4)
+
+                                        Button {
+                                            store.movePrintBatch(id: batch.id, by: -1)
+                                        } label: {
+                                            Image(systemName: "chevron.up")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(index == 0)
+                                        .help("Move earlier")
+
+                                        Button {
+                                            store.movePrintBatch(id: batch.id, by: 1)
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(index == batches.count - 1)
+                                        .help("Move later")
+
+                                        Button {
+                                            store.removePrintBatch(id: batch.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(.red)
+                                        .help("Remove from queue")
+                                    }
+
+                                }
+                                .padding(9)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(appCardBackground())
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+
+                    HStack {
+                        Button("Reset Queue", action: store.clearPrintQueue)
+                            .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Button {
+                            store.printAllPages()
+                        } label: {
+                            Label("Print Captures", systemImage: "printer.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+    }
+
+    private func captureSummary(for batch: PrintBatch) -> String {
+        var parts = ["\(batch.quantity) labels"]
+        if let start = store.document.capturedStartPosition(for: batch) {
+            parts.append(
+                "page \(start.pageIndex + 1) \(store.document.coordinateLabel(for: start.slotIndex))"
+            )
+        }
+        if let rows = batch.dataTable?.rows, !rows.isEmpty {
+            parts.append("CSV \(rows.count) rows")
+            return parts.joined(separator: " · ")
+        }
+        if let serial = batch.serialSettings, serial.mode == .rangedSets {
+            parts.append("\(serial.countPerSet) × \(max(1, serial.repeatSets)) sets")
+            return parts.joined(separator: " · ")
+        }
+        parts.append("selected area")
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -1147,7 +1427,11 @@ struct SingleLabelCanvas: View {
             let width = store.document.sheet.labelWidthMM
             let height = store.document.sheet.labelHeightMM
             let scale = min(proxy.size.width / width, proxy.size.height / height) * 0.9
-            let context = store.document.mergeContext(slotIndex: 0, pageIndex: store.currentPageIndex)
+            let firstDraftSlot = store.document.activeSlotIndices.first ?? 0
+            let context = store.document.currentSetupMergeContext(
+                slotIndex: firstDraftSlot,
+                pageIndex: 0
+            )
 
             ZStack {
                 Color.clear
@@ -1164,38 +1448,76 @@ struct SingleLabelCanvas: View {
                 ZStack(alignment: .topLeading) {
                     LabelSurface(shape: store.document.sheet.shape, cornerRadiusMM: store.document.sheet.cornerRadiusMM)
                         .fill(Color.white)
-                        .contentShape(LabelSurface(shape: store.document.sheet.shape, cornerRadiusMM: store.document.sheet.cornerRadiusMM))
-                        .onTapGesture {
-                            store.activatePrimaryTextElement()
-                        }
                     if store.document.formatCode == "680" || store.document.sheet.shape == .circle {
                         CircleAlignmentGuides(unitScale: scale, diameterMM: min(width, height))
                     }
                     LabelSurface(shape: store.document.sheet.shape, cornerRadiusMM: store.document.sheet.cornerRadiusMM)
                         .stroke(Color.secondary.opacity(0.35), lineWidth: 1.5)
+                        .allowsHitTesting(false)
 
-                    ForEach(store.document.elements) { element in
-                        EditableElementView(
-                            element: element,
-                            onTextChange: { content, rtf in
-                                store.updateTextElement(id: element.id, content: content, richTextRTF: rtf)
-                            },
-                            isSelected: store.selectedElementID == element.id,
-                            isEditing: store.editingElementID == element.id,
-                            context: context,
-                            serialSettings: store.document.serial,
-                            unitScale: scale,
-                            labelWidthMM: width,
-                            labelHeightMM: height,
-                            onSelect: { store.selectElement(element.id) },
-                            onBeginEditing: { store.selectElement(element.id, beginEditing: true) },
-                            onCommitEditing: { store.finishInlineEditing() },
-                            onMove: { frame in
-                                store.updateElement(id: element.id) { selected in
-                                    selected.frame = frame
-                                }
-                            }
+                    ZStack(alignment: .topLeading) {
+                        // Keep a tappable surface above the decorative fill and
+                        // stroke but below real elements. An empty element layer
+                        // otherwise intercepts the click without starting text
+                        // editing, which is especially noticeable on round labels.
+                        LabelSurface(
+                            shape: store.document.sheet.shape,
+                            cornerRadiusMM: store.document.sheet.cornerRadiusMM
                         )
+                        .fill(Color.clear)
+                        .contentShape(
+                            LabelSurface(
+                                shape: store.document.sheet.shape,
+                                cornerRadiusMM: store.document.sheet.cornerRadiusMM
+                            )
+                        )
+                        .onTapGesture {
+                            store.activatePrimaryTextElement()
+                        }
+
+                        ForEach(store.document.elements) { element in
+                            EditableElementView(
+                                element: element,
+                                onTextChange: { content, rtf in
+                                    store.updateTextElement(id: element.id, content: content, richTextRTF: rtf)
+                                },
+                                isSelected: store.selectedElementID == element.id,
+                                isEditing: store.editingElementID == element.id,
+                                context: context,
+                                serialSettings: store.document.serial,
+                                unitScale: scale,
+                                labelWidthMM: width,
+                                labelHeightMM: height,
+                                usesCircularTextFlow: store.document.sheet.shape == .circle
+                                    && element.type == .text
+                                    && element.usesCircularTextFlow == true,
+                                onSelect: { store.selectElement(element.id) },
+                                onBeginEditing: { store.selectElement(element.id, beginEditing: true) },
+                                onCommitEditing: { store.finishInlineEditing() },
+                                onMove: { frame in
+                                    store.updateElement(id: element.id) { selected in
+                                        selected.frame = frame
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .frame(width: scaled(width, by: scale), height: scaled(height, by: scale), alignment: .topLeading)
+                    .clipShape(LabelSurface(shape: store.document.sheet.shape, cornerRadiusMM: store.document.sheet.cornerRadiusMM))
+                    .contentShape(LabelSurface(shape: store.document.sheet.shape, cornerRadiusMM: store.document.sheet.cornerRadiusMM))
+
+                    if store.document.sheet.shape == .circle,
+                       store.selectedElement?.type == .text,
+                       store.selectedElement?.usesCircularTextFlow != true {
+                        LabelSurface(
+                            shape: store.document.sheet.shape,
+                            cornerRadiusMM: store.document.sheet.cornerRadiusMM
+                        )
+                        .stroke(
+                            Color.accentColor,
+                            style: StrokeStyle(lineWidth: 2, dash: [6, 4])
+                        )
+                        .allowsHitTesting(false)
                     }
                 }
                 .frame(width: scaled(width, by: scale), height: scaled(height, by: scale), alignment: .topLeading)
@@ -1237,6 +1559,7 @@ struct EditableElementView: View {
     let unitScale: CGFloat
     let labelWidthMM: Double
     let labelHeightMM: Double
+    let usesCircularTextFlow: Bool
     let onSelect: () -> Void
     let onBeginEditing: () -> Void
     let onCommitEditing: () -> Void
@@ -1272,6 +1595,7 @@ struct EditableElementView: View {
                     context: context,
                     serialSettings: serialSettings,
                     unitScale: unitScale,
+                    usesCircularTextFlow: usesCircularTextFlow,
                     onCommit: onCommitEditing
                 )
             } else {
@@ -1279,24 +1603,27 @@ struct EditableElementView: View {
                     element: element,
                     context: context,
                     serialSettings: serialSettings,
-                    unitScale: unitScale
+                    unitScale: unitScale,
+                    usesCircularTextFlow: usesCircularTextFlow
                 )
             }
         }
 
         baseView
             .frame(width: scaled(element.frame.width, by: unitScale), height: scaled(element.frame.height, by: unitScale))
-            .position(
-                x: scaled(element.frame.x + (element.frame.width / 2), by: unitScale),
-                y: scaled(element.frame.y + (element.frame.height / 2), by: unitScale)
-            )
-            .rotationEffect(.degrees(element.rotation))
-            .opacity(element.opacity)
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                TextElementSurface(
+                    isCircular: usesCircularTextFlow,
+                    cornerRadius: 8
+                )
                     .stroke(isSelected ? Color.accentColor : Color.clear, style: .init(lineWidth: 2, dash: [5, 3]))
             )
-            .contentShape(Rectangle())
+            .contentShape(
+                TextElementSurface(
+                    isCircular: usesCircularTextFlow,
+                    cornerRadius: 8
+                )
+            )
             .onTapGesture {
                 if element.type == .text {
                     onBeginEditing()
@@ -1305,6 +1632,12 @@ struct EditableElementView: View {
                 }
             }
             .gesture(dragGesture, including: isEditing ? .none : .all)
+            .rotationEffect(.degrees(element.rotation))
+            .opacity(element.opacity)
+            .position(
+                x: scaled(element.frame.x + (element.frame.width / 2), by: unitScale),
+                y: scaled(element.frame.y + (element.frame.height / 2), by: unitScale)
+            )
     }
 }
 
@@ -1314,11 +1647,15 @@ struct InlineEditableTextField: View {
     let context: MergeContext
     let serialSettings: SerialSettings
     let unitScale: CGFloat
+    let usesCircularTextFlow: Bool
     let onCommit: () -> Void
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
+            TextElementSurface(
+                isCircular: usesCircularTextFlow,
+                cornerRadius: scaled(element.cornerRadiusMM, by: unitScale)
+            )
                 .fill(element.background.color.opacity(max(element.background.alpha, 0.001)))
 
             AppKitInlineTextField(
@@ -1335,16 +1672,28 @@ struct InlineEditableTextField: View {
                 foreground: element.foreground.nsColor,
                 caretColor: element.foreground.nsColor,
                 placeCursorAtStart: element.content.hasPrefix("{{serial}}"),
+                usesCircularTextFlow: usesCircularTextFlow,
+                circularInsetX: CGFloat(textElementInsetXMM) * unitScale,
+                circularInsetY: CGFloat(textElementInsetYMM) * unitScale,
                 onCommit: {
                     onCommit()
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: element.textAlignment.alignment)
-            .padding(.horizontal, CGFloat(textElementInsetXMM) * unitScale)
-            .padding(.vertical, CGFloat(textElementInsetYMM) * unitScale)
+            .padding(
+                .horizontal,
+                usesCircularTextFlow ? 0 : CGFloat(textElementInsetXMM) * unitScale
+            )
+            .padding(
+                .vertical,
+                usesCircularTextFlow ? 0 : CGFloat(textElementInsetYMM) * unitScale
+            )
         }
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            TextElementSurface(
+                isCircular: usesCircularTextFlow,
+                cornerRadius: 8
+            )
                 .stroke(Color.accentColor, lineWidth: 2)
         )
     }
@@ -1356,6 +1705,9 @@ struct InlineEditableTextField: View {
 /// (`scalingFontSizes`), so a pasted run never converges to the entered
 /// size — it just multiplies from the foreign baseline.
 final class MatchStylePasteTextView: NSTextView {
+    var circularTopInset: CGFloat?
+    var circularLayoutSize: CGSize = .zero
+
     override func paste(_ sender: Any?) {
         pasteAsPlainText(sender)
     }
@@ -1414,6 +1766,9 @@ struct AppKitInlineTextField: NSViewRepresentable {
     let foreground: NSColor
     let caretColor: NSColor
     let placeCursorAtStart: Bool
+    let usesCircularTextFlow: Bool
+    let circularInsetX: CGFloat
+    let circularInsetY: CGFloat
     let onCommit: () -> Void
 
     struct ColorSignature: Equatable {
@@ -1453,18 +1808,19 @@ struct AppKitInlineTextField: NSViewRepresentable {
         textView.importsGraphics = false
         textView.isEditable = true
         textView.isSelectable = true
-        textView.isVerticallyResizable = true
+        textView.isVerticallyResizable = !usesCircularTextFlow
         textView.isHorizontallyResizable = false
         textView.textContainerInset = NSSize(width: 0, height: 0)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.heightTracksTextView = usesCircularTextFlow
         textView.delegate = context.coordinator
         context.coordinator.textView = textView
         applyInitialContent(to: textView, coordinator: context.coordinator)
 
         scrollView.documentView = textView
         DispatchQueue.main.async {
+            self.configureEditorGeometry(textView)
             self.centerVertically(textView)
             if self.placeCursorAtStart {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -1485,6 +1841,7 @@ struct AppKitInlineTextField: NSViewRepresentable {
         guard let textView = nsView.documentView as? NSTextView else { return }
         context.coordinator.textView = textView
         context.coordinator.parent = self
+        let geometryChanged = configureEditorGeometry(textView)
 
         // While a trailing sync is pending, the editor's storage is strictly
         // newer than the store. Any update arriving in that window (e.g. the
@@ -1504,6 +1861,9 @@ struct AppKitInlineTextField: NSViewRepresentable {
         if context.coordinator.lastAppliedRichTextData == richTextData,
            context.coordinator.lastAppliedStyle == styleSignature(),
            textView.string == text {
+            if geometryChanged {
+                centerVertically(textView)
+            }
             return
         }
 
@@ -1588,15 +1948,103 @@ struct AppKitInlineTextField: NSViewRepresentable {
         guard let textContainer = textView.textContainer, let layoutManager = textView.layoutManager else {
             return
         }
+        if usesCircularTextFlow {
+            configureEditorGeometry(textView)
+            let size = textView.enclosingScrollView?.contentSize ?? textView.bounds.size
+            guard size.width > 1, size.height > 1 else { return }
+            textView.textContainerInset = .zero
+            let circularTextView = textView as? MatchStylePasteTextView
+            let topInset = CircularTextLayoutRenderer.configureCenteredLayout(
+                layoutManager: layoutManager,
+                textContainer: textContainer,
+                size: size,
+                insets: CGSize(width: circularInsetX, height: circularInsetY),
+                initialTopInset: circularTextView?.circularLayoutSize == size
+                    ? circularTextView?.circularTopInset
+                    : nil
+            )
+            circularTextView?.circularTopInset = topInset
+            circularTextView?.circularLayoutSize = size
+            return
+        }
+
+        if !textContainer.exclusionPaths.isEmpty {
+            textContainer.exclusionPaths = []
+            let circularTextView = textView as? MatchStylePasteTextView
+            circularTextView?.circularTopInset = nil
+            circularTextView?.circularLayoutSize = .zero
+        }
         layoutManager.ensureLayout(for: textContainer)
-        let usedRect = layoutManager.usedRect(for: textContainer)
-        let availableHeight = textView.bounds.height
-        let verticalInset = max(0, floor((availableHeight - usedRect.height) / 2))
+        let nsText = textView.string as NSString
+        var visibleLength = nsText.length
+        while visibleLength > 0 {
+            let scalar = nsText.character(at: visibleLength - 1)
+            guard scalar == 10 || scalar == 13 else { break }
+            visibleLength -= 1
+        }
+
+        let usedHeight: CGFloat
+        if visibleLength > 0 {
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: NSRange(location: 0, length: visibleLength),
+                actualCharacterRange: nil
+            )
+            usedHeight = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            ).height
+        } else {
+            usedHeight = 0
+        }
+
+        let availableHeight = textView.enclosingScrollView?.contentSize.height ?? textView.bounds.height
+        let verticalInset = max(0, (availableHeight - usedHeight) / 2)
         // Re-assigning the same inset still invalidates layout (and pokes the
         // input context), so skip unless the centering actually moved.
         if abs(textView.textContainerInset.height - verticalInset) > 0.5 {
             textView.textContainerInset = NSSize(width: 0, height: verticalInset)
         }
+    }
+
+    @discardableResult
+    private func configureEditorGeometry(_ textView: NSTextView) -> Bool {
+        guard let textContainer = textView.textContainer else { return false }
+        if usesCircularTextFlow {
+            let size = textView.enclosingScrollView?.contentSize ?? textView.bounds.size
+            guard size.width > 1, size.height > 1 else { return false }
+            let changed = abs(textView.frame.width - size.width) > 0.5
+                || abs(textView.frame.height - size.height) > 0.5
+                || textView.isVerticallyResizable
+                || !textContainer.heightTracksTextView
+            if changed {
+                textView.isVerticallyResizable = false
+                textView.frame = CGRect(origin: .zero, size: size)
+                textView.minSize = size
+                textView.maxSize = size
+                textContainer.containerSize = size
+                textContainer.widthTracksTextView = true
+                textContainer.heightTracksTextView = true
+            }
+            return changed
+        }
+
+        let changed = !textView.isVerticallyResizable
+            || textContainer.heightTracksTextView
+            || !textContainer.exclusionPaths.isEmpty
+        if changed {
+            textView.isVerticallyResizable = true
+            textView.maxSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+            textContainer.widthTracksTextView = true
+            textContainer.heightTracksTextView = false
+            textContainer.exclusionPaths = []
+            let circularTextView = textView as? MatchStylePasteTextView
+            circularTextView?.circularTopInset = nil
+            circularTextView?.circularLayoutSize = .zero
+        }
+        return changed
     }
 
     private func resolvedFont() -> NSFont {
@@ -1874,7 +2322,7 @@ struct LivePagePreviewPanel: View {
         LivePagePreviewBody(
             document: store.previewDocument,
             pageIndex: store.currentPageIndex,
-            selectedSlots: Set(store.document.activeSlotIndices),
+            draftPlan: store.pendingDraftPlan,
             pageCount: store.document.pageCount,
             onTapSlot: { store.selectPlacementStart(at: $0) },
             onDragSlots: { store.selectPlacementRect(from: $0, to: $1) },
@@ -1887,7 +2335,7 @@ struct LivePagePreviewPanel: View {
 struct LivePagePreviewBody: View, Equatable {
     let document: LabelDocument
     let pageIndex: Int
-    let selectedSlots: Set<Int>
+    let draftPlan: DraftPlacementPlan?
     let pageCount: Int
     let onTapSlot: (Int) -> Void
     let onDragSlots: (Int, Int) -> Void
@@ -1896,13 +2344,44 @@ struct LivePagePreviewBody: View, Equatable {
     static func == (lhs: LivePagePreviewBody, rhs: LivePagePreviewBody) -> Bool {
         lhs.document == rhs.document
             && lhs.pageIndex == rhs.pageIndex
-            && lhs.selectedSlots == rhs.selectedSlots
+            && lhs.draftPlan == rhs.draftPlan
             && lhs.pageCount == rhs.pageCount
     }
 
     var body: some View {
-        let activePrintSlots = Set(document.visiblePreviewSlotIndices(pageIndex: pageIndex))
-        let printListEntries = makePrintListEntries(document: document, pageIndex: pageIndex, slots: document.visiblePreviewSlotIndices(pageIndex: pageIndex))
+        let capturedSlotList = document.visiblePreviewSlotIndices(
+            pageIndex: pageIndex
+        )
+        let capturedSlots = Set(capturedSlotList)
+        let candidatePlan = document.hasQueuedLabels ? draftPlan : nil
+        let draftConflict = candidatePlan.flatMap {
+            document.firstPlacementConflict(for: $0)
+        }
+        let candidateDraftSlots = candidatePlan.map {
+            Set(document.draftPreviewSlotIndices(
+                pageIndex: pageIndex,
+                plan: $0
+            ))
+        } ?? []
+        let validDraftPlan = draftConflict == nil ? candidatePlan : nil
+        let visibleDraftSlots = validDraftPlan == nil
+            ? Set<Int>()
+            : candidateDraftSlots
+        let conflictSlots = candidatePlan.map {
+            Set(document.draftConflictSlotIndices(
+                pageIndex: pageIndex,
+                plan: $0
+            ))
+        } ?? []
+        let conflictCount = max(
+            conflictSlots.count,
+            draftConflict == nil ? 0 : 1
+        )
+        let printListEntries = makePrintListEntries(
+            document: document,
+            pageIndex: pageIndex,
+            slots: capturedSlotList
+        )
 
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1914,15 +2393,19 @@ struct LivePagePreviewBody: View, Equatable {
                     .foregroundStyle(.secondary)
             }
 
-            Text("This is the full-sheet layout that will be exported or printed.")
+            Text(document.hasQueuedLabels
+                ? "Blue labels are captured for print. Orange labels preview the next uncaptured setup."
+                : "This is the full-sheet layout that will be exported or printed.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
 
             InteractivePagePreviewCanvas(
                 document: document,
                 pageIndex: pageIndex,
-                selectedSlots: selectedSlots,
-                activePrintSlots: activePrintSlots,
+                selectedSlots: visibleDraftSlots,
+                activePrintSlots: capturedSlots,
+                validDraftPlan: validDraftPlan,
+                conflictSlots: conflictSlots,
                 onTapSlot: onTapSlot,
                 onDragSlots: onDragSlots
             )
@@ -1936,13 +2419,30 @@ struct LivePagePreviewBody: View, Equatable {
                 Button("Reset Area", action: onResetArea)
                 .buttonStyle(.bordered)
 
-                Label("Blue = print now", systemImage: "rectangle.dashed")
+                Label(
+                    document.hasQueuedLabels ? "Captured" : "Print now",
+                    systemImage: "circle.fill"
+                )
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.accentColor)
+
+                if document.hasQueuedLabels {
+                    Label("Next", systemImage: "circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+
+                if conflictCount > 0 {
+                    Label("Overlap", systemImage: "exclamationmark.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                }
 
                 Spacer()
 
-                Text("print \(activePrintSlots.count) · selected \(selectedSlots.count) · pages \(pageCount)")
+                Text(document.hasQueuedLabels
+                    ? "captured \(capturedSlots.count) · next \(candidateDraftSlots.count) · conflicts \(conflictCount)"
+                    : "print \(capturedSlots.count) · pages \(pageCount)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -1950,7 +2450,9 @@ struct LivePagePreviewBody: View, Equatable {
             Divider()
 
             HStack {
-                Text("Print List")
+                Text(document.hasQueuedLabels
+                    ? "Captured Print List"
+                    : "Print List")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Text("\(printListEntries.count) item(s)")
@@ -1995,20 +2497,20 @@ struct LivePagePreviewBody: View, Equatable {
     }
 
     private func makePrintListEntries(document: LabelDocument, pageIndex: Int, slots: [Int]) -> [PrintListEntry] {
-        let textElements = document.elements.filter { $0.type == .text }
-        let codeElements = document.elements.filter { $0.type == .qrCode || $0.type == .code128 }
-
         return slots.compactMap { slotIndex in
-            let context = document.mergeContext(slotIndex: slotIndex, pageIndex: pageIndex)
+            let payload = document.renderPayload(slotIndex: slotIndex, pageIndex: pageIndex)
+            let context = payload.context
             guard context.isActive || !document.hasFiniteMergeRows else { return nil }
 
-            let textLines = textElements
-                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: document.serial) }
+            let textLines = payload.elements
+                .filter { $0.type == .text }
+                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: payload.serialSettings) }
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
 
-            let codeLines = codeElements
-                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: document.serial) }
+            let codeLines = payload.elements
+                .filter { $0.type == .qrCode || $0.type == .code128 }
+                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: payload.serialSettings) }
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
 
@@ -2071,6 +2573,8 @@ struct InteractivePagePreviewCanvas: View {
     let pageIndex: Int
     let selectedSlots: Set<Int>
     let activePrintSlots: Set<Int>
+    let validDraftPlan: DraftPlacementPlan?
+    let conflictSlots: Set<Int>
     let onTapSlot: (Int) -> Void
     let onDragSlots: (Int, Int) -> Void
 
@@ -2114,7 +2618,9 @@ struct InteractivePagePreviewCanvas: View {
                     unitScale: scale,
                     showGuides: true,
                     selectedSlots: selectedSlots,
-                    activePrintSlots: activePrintSlots
+                    activePrintSlots: activePrintSlots,
+                    validDraftPlan: validDraftPlan,
+                    conflictSlots: conflictSlots
                 )
                 .shadow(color: .black.opacity(0.08), radius: 18, y: 10)
                 .position(
@@ -2137,11 +2643,13 @@ struct InteractivePagePreviewCanvas: View {
                         )
                         .gesture(
                             DragGesture(minimumDistance: 0)
-                                .onChanged { _ in
+                                .onChanged { value in
                                     if dragStartSlot == nil {
                                         dragStartSlot = slotIndex
                                     }
-                                    if let dragStartSlot {
+                                    let isDragging = abs(value.translation.width) >= 2
+                                        || abs(value.translation.height) >= 2
+                                    if isDragging, let dragStartSlot {
                                         onDragSlots(dragStartSlot, slotIndex)
                                     }
                                 }
@@ -2166,6 +2674,8 @@ struct PageSheetContents: View {
     let showGuides: Bool
     var selectedSlots: Set<Int> = []
     var activePrintSlots: Set<Int> = []
+    var validDraftPlan: DraftPlacementPlan? = nil
+    var conflictSlots: Set<Int> = []
     var applyPreviewChrome: Bool = true
 
     var body: some View {
@@ -2181,14 +2691,24 @@ struct PageSheetContents: View {
                 ForEach(0..<document.sheet.columns, id: \.self) { column in
                     let slotIndex = row * document.sheet.columns + column
                     let frame = document.sheet.slotFrame(column: column, row: row)
+                    let preview = document.interactivePreviewPayload(
+                        slotIndex: slotIndex,
+                        pageIndex: pageIndex,
+                        validDraftPlan: validDraftPlan
+                    )
+                    let payload = preview.payload
 
                     LabelSlotView(
                         document: document,
-                        context: document.mergeContext(slotIndex: slotIndex, pageIndex: pageIndex),
+                        elements: payload.elements,
+                        context: payload.context,
+                        serialSettings: payload.serialSettings,
                         unitScale: unitScale,
                         showGuides: showGuides,
                         isSelected: selectedSlots.contains(slotIndex),
                         isPrintingNow: effectivePrintSlots.contains(slotIndex),
+                        isDraft: preview.source == .draft,
+                        hasConflict: conflictSlots.contains(slotIndex),
                         applyPreviewChrome: applyPreviewChrome
                     )
                     .frame(width: scaled(frame.width, by: unitScale), height: scaled(frame.height, by: unitScale))
@@ -2209,11 +2729,15 @@ struct PageSheetContents: View {
 
 struct LabelSlotView: View {
     let document: LabelDocument
+    let elements: [LabelElement]
     let context: MergeContext
+    let serialSettings: SerialSettings
     let unitScale: CGFloat
     let showGuides: Bool
     var isSelected: Bool = false
     var isPrintingNow: Bool = false
+    var isDraft: Bool = false
+    var hasConflict: Bool = false
     var applyPreviewChrome: Bool = true
 
     var body: some View {
@@ -2222,16 +2746,26 @@ struct LabelSlotView: View {
                 .fill(slotBackground)
 
             LabelSurface(shape: document.sheet.shape, cornerRadiusMM: document.sheet.cornerRadiusMM)
-                .stroke(borderColor, lineWidth: isPrintingNow ? 1.4 : 1)
+                .stroke(
+                    borderColor,
+                    style: StrokeStyle(
+                        lineWidth: hasConflict || isDraft || isPrintingNow
+                            ? 1.4
+                            : 1,
+                        dash: isDraft ? [2.5, 1.7] : []
+                    )
+                )
 
             if context.isActive || !document.hasFiniteMergeRows {
                 ZStack(alignment: .topLeading) {
-                    ForEach(document.elements) { element in
+                    ForEach(elements) { element in
                         ElementRenderableView(
                             element: element,
                             context: context,
-                            serialSettings: document.serial,
-                            unitScale: unitScale
+                            serialSettings: serialSettings,
+                            unitScale: unitScale,
+                            usesCircularTextFlow: document.sheet.shape == .circle
+                                && element.usesCircularTextFlow == true
                         )
                         .frame(width: scaled(element.frame.width, by: unitScale), height: scaled(element.frame.height, by: unitScale))
                         .position(
@@ -2252,11 +2786,20 @@ struct LabelSlotView: View {
 
     private func contentOpacity(for element: LabelElement) -> Double {
         guard applyPreviewChrome else { return element.opacity }
+        if isDraft {
+            return element.opacity * 0.78
+        }
         return isPrintingNow ? element.opacity : element.opacity * 0.65
     }
 
     private var slotBackground: Color {
         guard applyPreviewChrome else { return .white }
+        if hasConflict {
+            return Color.red.opacity(0.10)
+        }
+        if isDraft {
+            return Color.orange.opacity(0.08)
+        }
         if isPrintingNow {
             return Color.accentColor.opacity(0.10)
         }
@@ -2268,6 +2811,12 @@ struct LabelSlotView: View {
 
     private var borderColor: Color {
         guard applyPreviewChrome else { return .clear }
+        if hasConflict {
+            return Color.red.opacity(0.90)
+        }
+        if isDraft {
+            return Color.orange.opacity(0.90)
+        }
         if isPrintingNow {
             return Color.accentColor.opacity(0.65)
         }
@@ -2288,6 +2837,7 @@ struct PrintFidelityTextView: View {
     let context: MergeContext
     let serialSettings: SerialSettings
     let unitScale: CGFloat
+    let usesCircularTextFlow: Bool
 
     var body: some View {
         Canvas { graphics, size in
@@ -2310,7 +2860,8 @@ struct PrintFidelityTextView: View {
                     rect: rect,
                     context: cg,
                     mergeContext: context,
-                    serialSettings: serialSettings
+                    serialSettings: serialSettings,
+                    usesCircularFlow: usesCircularTextFlow
                 )
             }
         }
@@ -2322,22 +2873,20 @@ struct ElementRenderableView: View {
     let context: MergeContext
     let serialSettings: SerialSettings
     let unitScale: CGFloat
+    let usesCircularTextFlow: Bool
 
     var body: some View {
         switch element.type {
         case .text:
-            ZStack {
-                RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
-                    .fill(element.background.color)
-                // Insets, wrapping, alignment, and vertical centering all live
-                // inside the shared print path — no SwiftUI padding here.
-                PrintFidelityTextView(
-                    element: element,
-                    context: context,
-                    serialSettings: serialSettings,
-                    unitScale: unitScale
-                )
-            }
+            // Surface fill/stroke, insets, wrapping, alignment, and vertical
+            // centering all use the shared print path for exact fidelity.
+            PrintFidelityTextView(
+                element: element,
+                context: context,
+                serialSettings: serialSettings,
+                unitScale: unitScale,
+                usesCircularTextFlow: usesCircularTextFlow
+            )
         case .rectangle:
             RoundedRectangle(cornerRadius: scaled(element.cornerRadiusMM, by: unitScale), style: .continuous)
                 .fill(element.background.color)
@@ -2450,8 +2999,25 @@ struct LabelSurface: Shape {
         case .capsule:
             return Capsule().path(in: rect)
         case .circle:
-            return Circle().path(in: rect)
+            // LabelShape.circle represents the full printable oval for custom
+            // non-square sizes too, matching the PDF renderer's ellipse.
+            return Ellipse().path(in: rect)
         }
+    }
+}
+
+struct TextElementSurface: Shape {
+    let isCircular: Bool
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        if isCircular {
+            return Ellipse().path(in: rect)
+        }
+        return RoundedRectangle(
+            cornerRadius: cornerRadius,
+            style: .continuous
+        ).path(in: rect)
     }
 }
 
@@ -2539,6 +3105,51 @@ struct StepperField: View {
                 .frame(width: 78)
             Stepper(title, value: clampedValue, in: range)
                 .labelsHidden()
+        }
+    }
+}
+
+struct CompactStepperField: View {
+    let title: String
+    let value: Binding<Int>
+    let range: ClosedRange<Int>
+
+    private var clampedValue: Binding<Int> {
+        Binding(
+            get: {
+                min(max(value.wrappedValue, range.lowerBound), range.upperBound)
+            },
+            set: { newValue in
+                value.wrappedValue = min(
+                    max(newValue, range.lowerBound),
+                    range.upperBound
+                )
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 4) {
+                TextField(
+                    title,
+                    value: clampedValue,
+                    formatter: UIFormatters.integer
+                )
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(maxWidth: .infinity)
+
+                Stepper(title, value: clampedValue, in: range)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+            }
         }
     }
 }

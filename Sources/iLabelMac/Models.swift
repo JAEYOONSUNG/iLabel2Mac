@@ -222,6 +222,24 @@ struct SheetTemplate: Codable, Hashable, Identifiable {
     var shape: LabelShape
     var cornerRadiusMM: Double
 
+    /// The largest axis-aligned rectangle whose corners remain inside the
+    /// label boundary. Circular labels use the inscribed rectangle of their
+    /// ellipse; other shapes retain the full label bounds.
+    var textSafeFrame: RectMM {
+        guard shape == .circle else {
+            return RectMM(x: 0, y: 0, width: labelWidthMM, height: labelHeightMM)
+        }
+
+        let width = labelWidthMM / sqrt(2)
+        let height = labelHeightMM / sqrt(2)
+        return RectMM(
+            x: (labelWidthMM - width) / 2,
+            y: (labelHeightMM - height) / 2,
+            width: width,
+            height: height
+        )
+    }
+
     func slotFrame(column: Int, row: Int) -> RectMM {
         let x = marginLeftMM + (Double(column) * (labelWidthMM + horizontalGapMM))
         let y = marginTopMM + (Double(row) * (labelHeightMM + verticalGapMM))
@@ -476,7 +494,7 @@ enum PlacementFillDirection: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct MergeContext {
+struct MergeContext: Equatable {
     var row: [String: String]
     var serialValue: Int?
     var rowNumber: Int
@@ -547,6 +565,9 @@ struct LabelElement: Codable, Identifiable, Hashable {
     var strokeWidth: Double
     var cornerRadiusMM: Double
     var verticalTextLayout: Bool?
+    /// When true, text uses the full element ellipse and each line follows the
+    /// available chord instead of being restricted to an inscribed square.
+    var usesCircularTextFlow: Bool?
     var richTextRTF: Data?
     var imageData: Data?
     var imageScaleMode: ImageScaleMode
@@ -633,6 +654,7 @@ struct LabelElement: Codable, Identifiable, Hashable {
                 strokeWidth: 0,
                 cornerRadiusMM: 0,
                 verticalTextLayout: false,
+                usesCircularTextFlow: false,
                 richTextRTF: nil,
                 imageData: nil,
                 imageScaleMode: .fit
@@ -658,6 +680,7 @@ struct LabelElement: Codable, Identifiable, Hashable {
                 strokeWidth: 1,
                 cornerRadiusMM: 2.5,
                 verticalTextLayout: false,
+                usesCircularTextFlow: false,
                 richTextRTF: nil,
                 imageData: nil,
                 imageScaleMode: .fit
@@ -683,6 +706,7 @@ struct LabelElement: Codable, Identifiable, Hashable {
                 strokeWidth: 1,
                 cornerRadiusMM: 2,
                 verticalTextLayout: false,
+                usesCircularTextFlow: false,
                 richTextRTF: nil,
                 imageData: nil,
                 imageScaleMode: .fit
@@ -708,6 +732,7 @@ struct LabelElement: Codable, Identifiable, Hashable {
                 strokeWidth: 1,
                 cornerRadiusMM: 1.2,
                 verticalTextLayout: false,
+                usesCircularTextFlow: false,
                 richTextRTF: nil,
                 imageData: nil,
                 imageScaleMode: .fit
@@ -733,6 +758,7 @@ struct LabelElement: Codable, Identifiable, Hashable {
                 strokeWidth: 1,
                 cornerRadiusMM: 1.2,
                 verticalTextLayout: false,
+                usesCircularTextFlow: false,
                 richTextRTF: nil,
                 imageData: nil,
                 imageScaleMode: .fit
@@ -745,6 +771,171 @@ struct EmbeddedFont: Codable, Hashable {
     var postScriptName: String
     var familyName: String
     var data: Data
+}
+
+struct PrintBatch: Codable, Equatable, Identifiable {
+    /// Keeps accidental or malformed projects from requesting effectively
+    /// unbounded PDF generation. The capture UI rejects over-limit setups
+    /// explicitly instead of silently dropping labels.
+    static let quantityRange = 1...100_000
+
+    var id: UUID
+    var name: String
+    var elements: [LabelElement]
+    /// Numbering and CSV inputs are captured with the label so a queue entry
+    /// behaves like a snapshot of the setup, not just a copy of its artwork.
+    /// Optional fields keep print queues written by the first queue release
+    /// backward compatible.
+    var serialSettings: SerialSettings?
+    var dataTable: DataTable?
+    /// Physical sheet placement captured with this setup. When present, later
+    /// changes to the editor's start position cannot move this batch.
+    var capturedPlacement: PlacementSettings?
+    var startPageIndex: Int?
+    /// Offset within the captured placement's first page. New captures start
+    /// at zero; this preserves the exact continuation point of legacy queues
+    /// when they are upgraded from one global stream to fixed batches.
+    var startSlotOffset: Int?
+    /// Global merge index used by legacy queues before each batch gained its
+    /// own Numbering/CSV snapshot.
+    var legacySequenceOffset: Int?
+    private var storedQuantity: Int
+
+    var quantity: Int {
+        get { storedQuantity }
+        set { storedQuantity = Self.normalizedQuantity(newValue) }
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        quantity: Int,
+        elements: [LabelElement],
+        serialSettings: SerialSettings? = nil,
+        dataTable: DataTable? = nil,
+        capturedPlacement: PlacementSettings? = nil,
+        startPageIndex: Int? = nil,
+        startSlotOffset: Int? = nil,
+        legacySequenceOffset: Int? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.elements = elements
+        self.serialSettings = serialSettings
+        self.dataTable = dataTable
+        self.capturedPlacement = capturedPlacement
+        self.startPageIndex = startPageIndex.map { max(0, $0) }
+        self.startSlotOffset = startSlotOffset.map { max(0, $0) }
+        self.legacySequenceOffset = legacySequenceOffset.map { max(0, $0) }
+        self.storedQuantity = Self.normalizedQuantity(quantity)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case quantity
+        case elements
+        case serialSettings
+        case dataTable
+        case capturedPlacement
+        case startPageIndex
+        case startSlotOffset
+        case legacySequenceOffset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        elements = try container.decode([LabelElement].self, forKey: .elements)
+        serialSettings = try container.decodeIfPresent(SerialSettings.self, forKey: .serialSettings)
+        dataTable = try container.decodeIfPresent(DataTable.self, forKey: .dataTable)
+        capturedPlacement = try container.decodeIfPresent(PlacementSettings.self, forKey: .capturedPlacement)
+        startPageIndex = try container.decodeIfPresent(Int.self, forKey: .startPageIndex)
+            .map { max(0, $0) }
+        startSlotOffset = try container.decodeIfPresent(Int.self, forKey: .startSlotOffset)
+            .map { max(0, $0) }
+        legacySequenceOffset = try container.decodeIfPresent(Int.self, forKey: .legacySequenceOffset)
+            .map { max(0, $0) }
+        storedQuantity = Self.normalizedQuantity(
+            try container.decode(Int.self, forKey: .quantity)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encode(elements, forKey: .elements)
+        try container.encodeIfPresent(serialSettings, forKey: .serialSettings)
+        try container.encodeIfPresent(dataTable, forKey: .dataTable)
+        try container.encodeIfPresent(capturedPlacement, forKey: .capturedPlacement)
+        try container.encodeIfPresent(startPageIndex, forKey: .startPageIndex)
+        try container.encodeIfPresent(startSlotOffset, forKey: .startSlotOffset)
+        try container.encodeIfPresent(legacySequenceOffset, forKey: .legacySequenceOffset)
+    }
+
+    private static func normalizedQuantity(_ quantity: Int) -> Int {
+        min(
+            max(quantityRange.lowerBound, quantity),
+            quantityRange.upperBound
+        )
+    }
+}
+
+struct SlotRenderPayload: Equatable {
+    var elements: [LabelElement]
+    var context: MergeContext
+    var serialSettings: SerialSettings
+    var batchID: UUID?
+
+    init(
+        elements: [LabelElement],
+        context: MergeContext,
+        serialSettings: SerialSettings = .default,
+        batchID: UUID? = nil
+    ) {
+        self.elements = elements
+        self.context = context
+        self.serialSettings = serialSettings
+        self.batchID = batchID
+    }
+}
+
+struct PrintPlacementConflict: Equatable {
+    var existingBatchName: String
+    var pageIndex: Int
+    var slotIndex: Int
+}
+
+/// Placement for the not-yet-captured setup shown only in the interactive
+/// preview. It must never participate in PDF/PNG/print rendering.
+struct DraftPlacementPlan: Equatable {
+    var placement: PlacementSettings
+    var startPageIndex: Int
+    var quantity: Int
+
+    init(
+        placement: PlacementSettings,
+        startPageIndex: Int,
+        quantity: Int
+    ) {
+        self.placement = placement
+        self.startPageIndex = max(0, startPageIndex)
+        self.quantity = max(1, quantity)
+    }
+}
+
+enum InteractiveSlotRenderSource: Equatable {
+    case captured(UUID)
+    case draft
+    case inactive
+}
+
+struct InteractiveSlotRenderPayload: Equatable {
+    var payload: SlotRenderPayload
+    var source: InteractiveSlotRenderSource
 }
 
 struct LabelDocument: Codable, Equatable {
@@ -764,12 +955,35 @@ struct LabelDocument: Codable, Equatable {
     /// identically on machines that don't have them installed. Populated at save
     /// time, registered (process scope) at load time, then cleared from memory.
     var embeddedFonts: [EmbeddedFont]? = nil
+    /// Snapshots queued for a later multi-design print. Optional so projects
+    /// written before print queues existed continue to decode unchanged.
+    var printQueue: [PrintBatch]? = nil
+
+    var printBatches: [PrintBatch] {
+        get { printQueue ?? [] }
+        set { printQueue = newValue.isEmpty ? nil : newValue }
+    }
+
+    var queuedLabelCount: Int {
+        printBatches.reduce(into: 0) { count, batch in
+            let (sum, overflow) = count.addingReportingOverflow(batch.quantity)
+            count = overflow ? Int.max : sum
+        }
+    }
+
+    var hasQueuedLabels: Bool {
+        queuedLabelCount > 0
+    }
 
     var totalSlotCount: Int {
         max(1, sheet.columns * sheet.rows)
     }
 
     var activeSlotIndices: [Int] {
+        orderedSlotIndices(for: placement)
+    }
+
+    func orderedSlotIndices(for placement: PlacementSettings) -> [Int] {
         let indices = placement.selectedSlotIndices
             .filter { $0 >= 0 && $0 < totalSlotCount }
         let normalized = indices.isEmpty ? Array(0..<totalSlotCount) : Array(Set(indices))
@@ -788,15 +1002,41 @@ struct LabelDocument: Codable, Equatable {
         }
     }
 
+    func slotIndicesStarting(
+        at slotIndex: Int,
+        fillDirection: PlacementFillDirection
+    ) -> [Int] {
+        let allSlots = orderedSlotIndices(
+            for: PlacementSettings(
+                selectedSlotIndices: [],
+                fillDirection: fillDirection
+            )
+        )
+        guard let start = allSlots.firstIndex(of: slotIndex) else { return [] }
+        return Array(allSlots[start...])
+    }
+
     var pageCapacity: Int {
         max(1, activeSlotIndices.count)
     }
 
-    var mergeRowCount: Int {
+    /// Label count produced by the setup currently visible in Numbering/CSV,
+    /// deliberately ignoring any already-captured print queue.
+    var currentSetupLabelCount: Int {
         if let dataTable, !dataTable.rows.isEmpty {
             return dataTable.rows.count
         }
-        return serial.totalGeneratedCount
+        if serial.mode == .rangedSets, serial.totalGeneratedCount > 0 {
+            return serial.totalGeneratedCount
+        }
+        return pageCapacity
+    }
+
+    var mergeRowCount: Int {
+        if hasQueuedLabels {
+            return queuedLabelCount
+        }
+        return currentSetupLabelCount
     }
 
     var hasFiniteMergeRows: Bool {
@@ -804,9 +1044,39 @@ struct LabelDocument: Codable, Equatable {
     }
 
     var pageCount: Int {
-        let mergeRowCount = mergeRowCount
-        guard mergeRowCount > 0 else { return 1 }
-        return max(1, Int(ceil(Double(mergeRowCount) / Double(pageCapacity))))
+        guard hasQueuedLabels else {
+            let mergeRowCount = mergeRowCount
+            guard mergeRowCount > 0 else { return 1 }
+            return max(1, pagesNeeded(quantity: mergeRowCount, capacity: pageCapacity))
+        }
+
+        var maximumPageCount = 0
+        var legacyQuantity = 0
+        for batch in printBatches {
+            guard let capturedPlacement = batch.capturedPlacement else {
+                let (sum, overflow) = legacyQuantity.addingReportingOverflow(batch.quantity)
+                legacyQuantity = overflow ? Int.max : sum
+                continue
+            }
+
+            let capacity = max(1, orderedSlotIndices(for: capturedPlacement).count)
+            let span = pagesNeeded(
+                quantity: batch.quantity,
+                capacity: capacity,
+                startOffset: batch.startSlotOffset ?? 0
+            )
+            let startPage = max(0, batch.startPageIndex ?? 0)
+            let (endPage, overflow) = startPage.addingReportingOverflow(span)
+            maximumPageCount = max(maximumPageCount, overflow ? Int.max : endPage)
+        }
+
+        if legacyQuantity > 0 {
+            maximumPageCount = max(
+                maximumPageCount,
+                pagesNeeded(quantity: legacyQuantity, capacity: pageCapacity)
+            )
+        }
+        return max(1, maximumPageCount)
     }
 
     func visiblePreviewSlotIndices(pageIndex: Int) -> [Int] {
@@ -814,10 +1084,33 @@ struct LabelDocument: Codable, Equatable {
             return activeSlotIndices
         }
 
-        let visible = activeSlotIndices.filter { slotIndex in
+        let candidateSlots = printBatches.contains { $0.capturedPlacement != nil }
+            ? Array(0..<totalSlotCount)
+            : activeSlotIndices
+        let visible = candidateSlots.filter { slotIndex in
             mergeContext(slotIndex: slotIndex, pageIndex: pageIndex).isActive
         }
+        if hasQueuedLabels {
+            return visible
+        }
         return visible.isEmpty ? Array(activeSlotIndices.prefix(1)) : visible
+    }
+
+    private func pagesNeeded(
+        quantity: Int,
+        capacity: Int,
+        startOffset: Int = 0
+    ) -> Int {
+        let normalizedQuantity = max(1, quantity)
+        let normalizedCapacity = max(1, capacity)
+        let normalizedOffset = min(
+            max(0, startOffset),
+            normalizedCapacity - 1
+        )
+        let (adjustedQuantity, overflow) = normalizedQuantity
+            .addingReportingOverflow(normalizedOffset)
+        guard !overflow else { return Int.max }
+        return ((adjustedQuantity - 1) / normalizedCapacity) + 1
     }
 
     func bounds(for slotIndices: [Int]) -> RectMM {
@@ -860,32 +1153,88 @@ struct LabelDocument: Codable, Equatable {
     }
 
     func mergeContext(slotIndex: Int, pageIndex: Int) -> MergeContext {
-        guard let logicalSlot = activeSlotIndices.firstIndex(of: slotIndex) else {
+        if hasQueuedLabels {
+            guard let position = queuedBatchPosition(
+                slotIndex: slotIndex,
+                pageIndex: pageIndex
+            ) else {
+                return inactiveMergeContext(
+                    slotIndex: slotIndex,
+                    pageIndex: pageIndex
+                )
+            }
+
+            let batchSerial = position.batch.serialSettings ?? serial
+            let sequenceIndex = position.batch.serialSettings == nil
+                ? position.sequenceIndex
+                : position.localIndex
+            let tableRows: [[String: String]]
+            if position.batch.serialSettings != nil {
+                tableRows = position.batch.dataTable?.rows ?? []
+            } else {
+                // Compatibility for queues created before setup snapshots were
+                // added: their merge inputs remain document-global.
+                tableRows = dataTable?.rows ?? []
+            }
+
+            let rowData: [String: String]
+            let serialValue: Int?
+            if !tableRows.isEmpty {
+                rowData = sequenceIndex < tableRows.count
+                    ? tableRows[sequenceIndex]
+                    : [:]
+                serialValue = batchSerial.start + (sequenceIndex * batchSerial.step)
+            } else if batchSerial.mode == .rangedSets {
+                let generated = batchSerial.generatedValue(at: sequenceIndex)
+                    ?? (batchSerial.start + (sequenceIndex * batchSerial.step))
+                serialValue = generated
+                let countPerSet = max(batchSerial.countPerSet, 1)
+                rowData = [
+                    "serial": batchSerial.formatted(generated),
+                    "serial_raw": "\(generated)",
+                    "set": "\((sequenceIndex / countPerSet) + 1)",
+                    "index_in_set": "\((sequenceIndex % countPerSet) + 1)"
+                ]
+            } else {
+                rowData = [:]
+                serialValue = batchSerial.start + (sequenceIndex * batchSerial.step)
+            }
+
             return MergeContext(
-                row: [:],
-                serialValue: nil,
-                rowNumber: 0,
+                row: rowData,
+                serialValue: serialValue,
+                rowNumber: sequenceIndex + 1,
                 pageNumber: pageIndex + 1,
                 slotNumber: slotIndex + 1,
-                isActive: false
+                isActive: true
             )
         }
 
-        let globalIndex = (pageIndex * pageCapacity) + logicalSlot
-        let tableRows = dataTable?.rows ?? []
-        let hasCSVRows = !tableRows.isEmpty
+        guard let globalIndex = globalIndex(
+            slotIndex: slotIndex,
+            pageIndex: pageIndex
+        ) else {
+            return inactiveMergeContext(
+                slotIndex: slotIndex,
+                pageIndex: pageIndex
+            )
+        }
 
         let isActive: Bool
         let rowData: [String: String]
         let serialValue: Int?
+        let rowNumber: Int
 
-        if hasCSVRows {
+        if let dataTable, !dataTable.rows.isEmpty {
+            let tableRows = dataTable.rows
             isActive = globalIndex < tableRows.count
             rowData = isActive ? tableRows[globalIndex] : [:]
             serialValue = isActive ? (serial.start + (globalIndex * serial.step)) : nil
+            rowNumber = globalIndex + 1
         } else if serial.mode == .rangedSets {
             serialValue = serial.generatedValue(at: globalIndex)
             isActive = serialValue != nil
+            rowNumber = globalIndex + 1
             if let serialValue {
                 let countPerSet = max(serial.countPerSet, 1)
                 let setNumber = (globalIndex / countPerSet) + 1
@@ -903,26 +1252,502 @@ struct LabelDocument: Codable, Equatable {
             isActive = true
             rowData = [:]
             serialValue = serial.start + (globalIndex * serial.step)
+            rowNumber = globalIndex + 1
         }
 
         return MergeContext(
             row: rowData,
             serialValue: serialValue,
-            rowNumber: globalIndex + 1,
+            rowNumber: rowNumber,
             pageNumber: pageIndex + 1,
             slotNumber: slotIndex + 1,
             isActive: isActive
         )
     }
 
-    mutating func clampElementsToSheet() {
-        elements = elements.map { element in
-            var copy = element
-            copy.frame = element.frame.clamped(
-                maxWidth: sheet.labelWidthMM,
-                maxHeight: sheet.labelHeightMM
+    /// Merge values for the setup currently being edited. Captured batches
+    /// deliberately do not participate, so changing Numbering/CSV after a
+    /// capture is reflected immediately on the label editor.
+    func currentSetupMergeContext(slotIndex: Int, pageIndex: Int) -> MergeContext {
+        var currentSetup = self
+        currentSetup.printQueue = nil
+        return currentSetup.mergeContext(slotIndex: slotIndex, pageIndex: pageIndex)
+    }
+
+    func draftPlacementPlan(startPageIndex: Int) -> DraftPlacementPlan {
+        DraftPlacementPlan(
+            placement: placement,
+            startPageIndex: startPageIndex,
+            quantity: currentSetupLabelCount
+        )
+    }
+
+    /// Slots occupied by the current, not-yet-captured setup on one physical
+    /// page. The setup sequence always starts at local index zero even when it
+    /// is staged on page two or later.
+    func draftPreviewSlotIndices(
+        pageIndex: Int,
+        plan: DraftPlacementPlan
+    ) -> [Int] {
+        let schedule = placementSchedule(for: plan)
+        return usedSlots(in: schedule, pageIndex: pageIndex)
+    }
+
+    /// Preview-only payload for the current setup. Captured output continues
+    /// to use `renderPayload`, so an uncommitted draft can never leak into an
+    /// exported or printed page.
+    func draftPreviewPayload(
+        slotIndex: Int,
+        pageIndex: Int,
+        plan: DraftPlacementPlan
+    ) -> SlotRenderPayload {
+        let schedule = placementSchedule(for: plan)
+        guard localIndex(
+            in: schedule,
+            slotIndex: slotIndex,
+            pageIndex: pageIndex
+        ) != nil else {
+            return SlotRenderPayload(
+                elements: elements,
+                context: inactiveMergeContext(
+                    slotIndex: slotIndex,
+                    pageIndex: pageIndex
+                ),
+                serialSettings: serial
             )
-            return copy
+        }
+
+        var currentSetup = self
+        currentSetup.printQueue = nil
+        currentSetup.placement = plan.placement
+        let relativePageIndex = pageIndex - plan.startPageIndex
+        var payload = currentSetup.renderPayload(
+            slotIndex: slotIndex,
+            pageIndex: relativePageIndex
+        )
+        // Sequence data is local to the draft, but {{page}} must reflect the
+        // physical sheet page on which the draft will be captured.
+        payload.context.pageNumber = pageIndex + 1
+        return payload
+    }
+
+    /// Composes the interactive preview without changing committed rendering.
+    /// A captured slot always wins; callers pass only a conflict-free plan.
+    func interactivePreviewPayload(
+        slotIndex: Int,
+        pageIndex: Int,
+        validDraftPlan: DraftPlacementPlan?
+    ) -> InteractiveSlotRenderPayload {
+        let committed = renderPayload(
+            slotIndex: slotIndex,
+            pageIndex: pageIndex
+        )
+        if committed.context.isActive, let batchID = committed.batchID {
+            return InteractiveSlotRenderPayload(
+                payload: committed,
+                source: .captured(batchID)
+            )
+        }
+
+        if let validDraftPlan {
+            let draft = draftPreviewPayload(
+                slotIndex: slotIndex,
+                pageIndex: pageIndex,
+                plan: validDraftPlan
+            )
+            if draft.context.isActive {
+                return InteractiveSlotRenderPayload(
+                    payload: draft,
+                    source: .draft
+                )
+            }
+        }
+
+        return InteractiveSlotRenderPayload(
+            payload: committed,
+            source: .inactive
+        )
+    }
+
+    func draftConflictSlotIndices(
+        pageIndex: Int,
+        plan: DraftPlacementPlan
+    ) -> [Int] {
+        draftPreviewSlotIndices(pageIndex: pageIndex, plan: plan).filter {
+            let committed = renderPayload(slotIndex: $0, pageIndex: pageIndex)
+            return committed.context.isActive && committed.batchID != nil
+        }
+    }
+
+    func queuedBatch(atGlobalIndex globalIndex: Int) -> PrintBatch? {
+        flattenedQueuedBatchPosition(atGlobalIndex: globalIndex)?.batch
+    }
+
+    private func flattenedQueuedBatchPosition(
+        atGlobalIndex globalIndex: Int
+    ) -> (batch: PrintBatch, localIndex: Int)? {
+        guard globalIndex >= 0 else { return nil }
+
+        var remainingIndex = globalIndex
+        for batch in printBatches {
+            let quantity = max(0, batch.quantity)
+            if remainingIndex < quantity {
+                return (batch, remainingIndex)
+            }
+            remainingIndex -= quantity
+        }
+        return nil
+    }
+
+    func renderPayload(slotIndex: Int, pageIndex: Int) -> SlotRenderPayload {
+        let context = mergeContext(slotIndex: slotIndex, pageIndex: pageIndex)
+        guard
+            hasQueuedLabels,
+            context.isActive,
+            let position = queuedBatchPosition(
+                slotIndex: slotIndex,
+                pageIndex: pageIndex
+            )
+        else {
+            return SlotRenderPayload(
+                elements: elements,
+                context: context,
+                serialSettings: serial
+            )
+        }
+
+        return SlotRenderPayload(
+            elements: position.batch.elements,
+            context: context,
+            serialSettings: position.batch.serialSettings ?? serial,
+            batchID: position.batch.id
+        )
+    }
+
+    /// Upgrades queues written before placement snapshots existed. Their old
+    /// behavior was one continuous stream through the document's current
+    /// placement; page + slot offsets reproduce that exact visible mapping,
+    /// then make every batch immutable for future placement changes.
+    mutating func freezeLegacyPrintQueuePlacement() {
+        guard var batches = printQueue,
+              batches.contains(where: { $0.capturedPlacement == nil })
+        else { return }
+
+        let frozenPlacement = placement
+        let capacity = max(1, orderedSlotIndices(for: frozenPlacement).count)
+        var legacyOffset = 0
+        for index in batches.indices where batches[index].capturedPlacement == nil {
+            batches[index].capturedPlacement = frozenPlacement
+            batches[index].startPageIndex = legacyOffset / capacity
+            batches[index].startSlotOffset = legacyOffset % capacity
+            batches[index].legacySequenceOffset = legacyOffset
+            let (nextOffset, overflow) = legacyOffset
+                .addingReportingOverflow(batches[index].quantity)
+            legacyOffset = overflow ? Int.max : nextOffset
+        }
+        printQueue = batches
+    }
+
+    func firstPlacementConflict(
+        for candidate: PrintBatch
+    ) -> PrintPlacementConflict? {
+        guard let candidateSchedule = placementSchedule(for: candidate) else {
+            return nil
+        }
+        return firstPlacementConflict(for: candidateSchedule)
+    }
+
+    func firstPlacementConflict(
+        for plan: DraftPlacementPlan
+    ) -> PrintPlacementConflict? {
+        firstPlacementConflict(for: placementSchedule(for: plan))
+    }
+
+    private func firstPlacementConflict(
+        for candidateSchedule: PlacementSchedule
+    ) -> PrintPlacementConflict? {
+        for existing in printBatches {
+            guard let existingSchedule = placementSchedule(for: existing),
+                  let collision = firstCollision(
+                    candidateSchedule,
+                    existingSchedule
+                  )
+            else { continue }
+            return PrintPlacementConflict(
+                existingBatchName: existing.name,
+                pageIndex: collision.pageIndex,
+                slotIndex: collision.slotIndex
+            )
+        }
+
+        let legacyBatches = printBatches.filter { $0.capturedPlacement == nil }
+        let legacyQuantity = legacyBatches.reduce(into: 0) { total, batch in
+            let (sum, overflow) = total.addingReportingOverflow(batch.quantity)
+            total = overflow ? Int.max : sum
+        }
+        if legacyQuantity > 0 {
+            let legacySchedule = PlacementSchedule(
+                placement: placement,
+                startPageIndex: 0,
+                startSlotOffset: 0,
+                quantity: legacyQuantity,
+                name: legacyBatches.first?.name ?? "Existing capture"
+            )
+            if let collision = firstCollision(candidateSchedule, legacySchedule) {
+                return PrintPlacementConflict(
+                    existingBatchName: legacySchedule.name,
+                    pageIndex: collision.pageIndex,
+                    slotIndex: collision.slotIndex
+                )
+            }
+        }
+        return nil
+    }
+
+    func capturedStartPosition(
+        for batch: PrintBatch
+    ) -> (pageIndex: Int, slotIndex: Int)? {
+        guard let schedule = placementSchedule(for: batch),
+              let slotIndex = usedSlots(
+                in: schedule,
+                pageIndex: schedule.startPageIndex
+              ).first
+        else { return nil }
+        return (schedule.startPageIndex, slotIndex)
+    }
+
+    private struct QueueSlotPosition {
+        var batch: PrintBatch
+        var localIndex: Int
+        var sequenceIndex: Int
+    }
+
+    private struct PlacementSchedule {
+        var placement: PlacementSettings
+        var startPageIndex: Int
+        var startSlotOffset: Int
+        var quantity: Int
+        var name: String
+    }
+
+    private func queuedBatchPosition(
+        slotIndex: Int,
+        pageIndex: Int
+    ) -> QueueSlotPosition? {
+        guard pageIndex >= 0, slotIndex >= 0, slotIndex < totalSlotCount else {
+            return nil
+        }
+
+        let legacyGlobalIndex = globalIndex(
+            slotIndex: slotIndex,
+            pageIndex: pageIndex
+        )
+        var remainingLegacyIndex = legacyGlobalIndex
+
+        for batch in printBatches {
+            if let capturedPlacement = batch.capturedPlacement {
+                let schedule = PlacementSchedule(
+                    placement: capturedPlacement,
+                    startPageIndex: max(0, batch.startPageIndex ?? 0),
+                    startSlotOffset: max(0, batch.startSlotOffset ?? 0),
+                    quantity: batch.quantity,
+                    name: batch.name
+                )
+                if let localIndex = localIndex(
+                    in: schedule,
+                    slotIndex: slotIndex,
+                    pageIndex: pageIndex
+                ) {
+                    let sequenceOffset = max(
+                        0,
+                        batch.legacySequenceOffset ?? 0
+                    )
+                    let (sequenceIndex, overflow) = sequenceOffset
+                        .addingReportingOverflow(localIndex)
+                    return QueueSlotPosition(
+                        batch: batch,
+                        localIndex: localIndex,
+                        sequenceIndex: overflow ? Int.max : sequenceIndex
+                    )
+                }
+                continue
+            }
+
+            guard let legacyIndex = remainingLegacyIndex else { continue }
+            if legacyIndex < batch.quantity {
+                return QueueSlotPosition(
+                    batch: batch,
+                    localIndex: legacyIndex,
+                    sequenceIndex: legacyGlobalIndex ?? legacyIndex
+                )
+            }
+            remainingLegacyIndex = legacyIndex - batch.quantity
+        }
+        return nil
+    }
+
+    private func placementSchedule(for batch: PrintBatch) -> PlacementSchedule? {
+        guard let capturedPlacement = batch.capturedPlacement else { return nil }
+        return PlacementSchedule(
+            placement: capturedPlacement,
+            startPageIndex: max(0, batch.startPageIndex ?? 0),
+            startSlotOffset: max(0, batch.startSlotOffset ?? 0),
+            quantity: batch.quantity,
+            name: batch.name
+        )
+    }
+
+    private func placementSchedule(
+        for plan: DraftPlacementPlan
+    ) -> PlacementSchedule {
+        PlacementSchedule(
+            placement: plan.placement,
+            startPageIndex: plan.startPageIndex,
+            startSlotOffset: 0,
+            quantity: plan.quantity,
+            name: "Current setup"
+        )
+    }
+
+    private func localIndex(
+        in schedule: PlacementSchedule,
+        slotIndex: Int,
+        pageIndex: Int
+    ) -> Int? {
+        let relativePage = pageIndex - schedule.startPageIndex
+        guard relativePage >= 0 else { return nil }
+        let slots = orderedSlotIndices(for: schedule.placement)
+        guard let indexOnPage = slots.firstIndex(of: slotIndex) else { return nil }
+        let (pageOffset, multiplicationOverflow) = relativePage
+            .multipliedReportingOverflow(by: slots.count)
+        guard !multiplicationOverflow else { return nil }
+        let (index, additionOverflow) = pageOffset
+            .addingReportingOverflow(indexOnPage)
+        let normalizedStartOffset = min(
+            schedule.startSlotOffset,
+            max(0, slots.count - 1)
+        )
+        guard
+            !additionOverflow,
+            index >= normalizedStartOffset
+        else { return nil }
+        let localIndex = index - normalizedStartOffset
+        guard localIndex < schedule.quantity else { return nil }
+        return localIndex
+    }
+
+    private func usedSlots(
+        in schedule: PlacementSchedule,
+        pageIndex: Int
+    ) -> [Int] {
+        let slots = orderedSlotIndices(for: schedule.placement)
+        return slots.filter {
+            localIndex(
+                in: schedule,
+                slotIndex: $0,
+                pageIndex: pageIndex
+            ) != nil
+        }
+    }
+
+    private func firstCollision(
+        _ lhs: PlacementSchedule,
+        _ rhs: PlacementSchedule
+    ) -> (pageIndex: Int, slotIndex: Int)? {
+        let lhsSpan = pagesNeeded(
+            quantity: lhs.quantity,
+            capacity: orderedSlotIndices(for: lhs.placement).count,
+            startOffset: lhs.startSlotOffset
+        )
+        let rhsSpan = pagesNeeded(
+            quantity: rhs.quantity,
+            capacity: orderedSlotIndices(for: rhs.placement).count,
+            startOffset: rhs.startSlotOffset
+        )
+        let (lhsEnd, lhsOverflow) = lhs.startPageIndex
+            .addingReportingOverflow(lhsSpan)
+        let (rhsEnd, rhsOverflow) = rhs.startPageIndex
+            .addingReportingOverflow(rhsSpan)
+        let overlapStart = max(lhs.startPageIndex, rhs.startPageIndex)
+        let overlapEnd = min(
+            lhsOverflow ? Int.max : lhsEnd,
+            rhsOverflow ? Int.max : rhsEnd
+        )
+        guard overlapStart < overlapEnd else { return nil }
+
+        var pagesToCheck = [overlapStart, overlapEnd - 1]
+        if overlapEnd - overlapStart > 2 {
+            pagesToCheck.append(overlapStart + 1)
+        }
+        for pageIndex in Set(pagesToCheck).sorted() {
+            let left = Set(usedSlots(in: lhs, pageIndex: pageIndex))
+            let right = Set(usedSlots(in: rhs, pageIndex: pageIndex))
+            if let slotIndex = left.intersection(right).min() {
+                return (pageIndex, slotIndex)
+            }
+        }
+        return nil
+    }
+
+    private func inactiveMergeContext(
+        slotIndex: Int,
+        pageIndex: Int
+    ) -> MergeContext {
+        MergeContext(
+            row: [:],
+            serialValue: nil,
+            rowNumber: 0,
+            pageNumber: max(0, pageIndex) + 1,
+            slotNumber: max(0, slotIndex) + 1,
+            isActive: false
+        )
+    }
+
+    private func globalIndex(slotIndex: Int, pageIndex: Int) -> Int? {
+        guard
+            pageIndex >= 0,
+            let logicalSlot = activeSlotIndices.firstIndex(of: slotIndex)
+        else {
+            return nil
+        }
+        let (pageOffset, multiplicationOverflow) = pageIndex
+            .multipliedReportingOverflow(by: pageCapacity)
+        guard !multiplicationOverflow else { return nil }
+        let (index, additionOverflow) = pageOffset
+            .addingReportingOverflow(logicalSlot)
+        return additionOverflow ? nil : index
+    }
+
+    mutating func clampElementsToSheet() {
+        func clamped(_ elements: [LabelElement]) -> [LabelElement] {
+            elements.map { element in
+                var copy = element
+                if sheet.shape == .circle,
+                   element.type == .text,
+                   element.usesCircularTextFlow == true {
+                    copy.frame = RectMM(
+                        x: 0,
+                        y: 0,
+                        width: sheet.labelWidthMM,
+                        height: sheet.labelHeightMM
+                    )
+                } else {
+                    copy.frame = element.frame.clamped(
+                        maxWidth: sheet.labelWidthMM,
+                        maxHeight: sheet.labelHeightMM
+                    )
+                }
+                return copy
+            }
+        }
+
+        elements = clamped(elements)
+        if let printQueue {
+            self.printQueue = printQueue.map { batch in
+                var copy = batch
+                copy.elements = clamped(batch.elements)
+                return copy
+            }
         }
     }
 

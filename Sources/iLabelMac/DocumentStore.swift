@@ -38,6 +38,7 @@ final class DocumentStore: ObservableObject {
     @Published var editingElementID: UUID?
     @Published var canvasMode: CanvasMode = .label
     @Published var currentPageIndex = 0
+    @Published private(set) var pendingDraftPageIndex: Int? = 0
     @Published var statusMessage = "Ready"
     @Published var projectURL: URL?
     @Published var formatSearchText = ""
@@ -46,6 +47,7 @@ final class DocumentStore: ObservableObject {
     @Published var newQuickTextPreset = ""
     @Published var currentWiFiSSID = ""
     @Published var wifiTestStatus = "Not tested"
+    @Published var captureQueueIssue: String?
     @Published var appearanceMode: AppAppearanceMode = .system {
         didSet { persistAppearanceMode() }
     }
@@ -98,6 +100,53 @@ final class DocumentStore: ObservableObject {
     var editingElement: LabelElement? {
         guard let editingElementID else { return nil }
         return document.elements.first(where: { $0.id == editingElementID })
+    }
+
+    /// Once captures exist, one blank staging page remains navigable after the
+    /// last printed page so a full sheet never blocks the next capture.
+    var navigationPageCount: Int {
+        guard document.hasQueuedLabels, document.pageCount < Int.max else {
+            return document.pageCount
+        }
+        return document.pageCount + 1
+    }
+
+    var isCaptureStagingPage: Bool {
+        document.hasQueuedLabels && currentPageIndex == document.pageCount
+    }
+
+    var pendingDraftPlan: DraftPlacementPlan? {
+        guard let pendingDraftPageIndex else { return nil }
+        return document.draftPlacementPlan(
+            startPageIndex: pendingDraftPageIndex
+        )
+    }
+
+    var pendingDraftConflict: PrintPlacementConflict? {
+        guard document.hasQueuedLabels, let pendingDraftPlan else {
+            return nil
+        }
+        return document.firstPlacementConflict(for: pendingDraftPlan)
+    }
+
+    var pendingDraftIssueMessage: String? {
+        guard let pendingDraftConflict else { return nil }
+        return placementConflictMessage(pendingDraftConflict)
+    }
+
+    var canCaptureCurrentLabel: Bool {
+        guard !document.elements.isEmpty else { return false }
+        if document.hasQueuedLabels && pendingDraftPageIndex == nil {
+            return false
+        }
+        return pendingDraftConflict == nil
+    }
+
+    private func clampCurrentPageIndex() {
+        currentPageIndex = min(
+            max(0, currentPageIndex),
+            max(0, navigationPageCount - 1)
+        )
     }
 
     var currentFormat: OfficialFormatDefinition? {
@@ -168,23 +217,35 @@ final class DocumentStore: ObservableObject {
 
     private func applyRestoredDocument(_ restored: LabelDocument) {
         lastUndoCoalescingKey = nil
+        let didRestoreQueueMutation =
+            document.printBatches != restored.printBatches
         document = restored
         document.clampElementsToSheet()
+        if didRestoreQueueMutation {
+            pendingDraftPageIndex = document.hasQueuedLabels ? nil : 0
+        } else if !document.hasQueuedLabels,
+                  pendingDraftPageIndex == nil {
+            pendingDraftPageIndex = 0
+        }
         if let selectedElementID, !document.elements.contains(where: { $0.id == selectedElementID }) {
             self.selectedElementID = document.elements.first?.id
         }
         editingElementID = nil
         persistPrintAutomationCache(document.printAutomation)
-        currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
+        clampCurrentPageIndex()
         refreshUndoState()
         schedulePreviewRefresh(immediate: true)
     }
 
     func updateSheet(_ edit: (inout SheetTemplate) -> Void) {
+        guard !document.hasQueuedLabels else {
+            statusMessage = "Reset the capture queue before changing sheet geometry"
+            return
+        }
         recordUndo(coalescingKey: "sheet")
         edit(&document.sheet)
         document.clampElementsToSheet()
-        currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
+        clampCurrentPageIndex()
         schedulePreviewRefresh()
     }
 
@@ -197,7 +258,7 @@ final class DocumentStore: ObservableObject {
         // synchronously (tens–hundreds of ms) and this method runs on every
         // keystroke of the title/notes/Wi-Fi text fields — it froze the UI.
         // The SSID label refreshes where it matters: save, test, and print.
-        currentPageIndex = min(currentPageIndex, max(0, document.pageCount - 1))
+        clampCurrentPageIndex()
         schedulePreviewRefresh()
     }
 
@@ -218,6 +279,16 @@ final class DocumentStore: ObservableObject {
             maxWidth: document.sheet.labelWidthMM,
             maxHeight: document.sheet.labelHeightMM
         )
+        if document.sheet.shape == .circle,
+           document.elements[index].type == .text,
+           document.elements[index].usesCircularTextFlow == true {
+            document.elements[index].frame = RectMM(
+                x: 0,
+                y: 0,
+                width: document.sheet.labelWidthMM,
+                height: document.sheet.labelHeightMM
+            )
+        }
         schedulePreviewRefresh()
     }
 
@@ -416,17 +487,67 @@ final class DocumentStore: ObservableObject {
         statusMessage = vertical ? "Applied vertical stacked text layout" : "Applied horizontal text layout"
     }
 
+    private func ensureLegacyQueueIsFrozen() {
+        guard document.printBatches.contains(where: {
+            $0.capturedPlacement == nil
+        }) else { return }
+        updateDocument(coalescingKey: nil) { document in
+            document.freezeLegacyPrintQueuePlacement()
+        }
+    }
+
+    private func placementConflictMessage(
+        _ conflict: PrintPlacementConflict
+    ) -> String {
+        let coordinate = document.coordinateLabel(for: conflict.slotIndex)
+        return "Page \(conflict.pageIndex + 1) \(coordinate) is already fixed by “\(conflict.existingBatchName)”. Choose an empty start position for the next capture."
+    }
+
+    private func updatePendingDraftStatus(successMessage: String) {
+        if let pendingDraftIssueMessage {
+            // This conflict is derived from the live Numbering/CSV quantity,
+            // so let the computed message update immediately when those
+            // inputs change instead of caching a stale error string.
+            captureQueueIssue = nil
+            statusMessage = pendingDraftIssueMessage
+        } else {
+            captureQueueIssue = nil
+            statusMessage = successMessage
+        }
+    }
+
     func selectPlacementStart(at slotIndex: Int) {
+        ensureLegacyQueueIsFrozen()
         let total = document.totalSlotCount
         guard slotIndex >= 0, slotIndex < total else { return }
-        updateDocument { document in
-            document.placement.selectedSlotIndices = Array(slotIndex..<total)
+        if document.hasQueuedLabels {
+            let committed = document.renderPayload(
+                slotIndex: slotIndex,
+                pageIndex: currentPageIndex
+            )
+            if committed.context.isActive, committed.batchID != nil {
+                let coordinate = document.coordinateLabel(for: slotIndex)
+                let message = "Page \(currentPageIndex + 1) \(coordinate) is already captured. Choose an empty start position."
+                captureQueueIssue = message
+                statusMessage = message
+                return
+            }
         }
-        statusMessage = "Placement starts at \(document.coordinateLabel(for: slotIndex))"
+        updateDocument { document in
+            document.placement.selectedSlotIndices = document.slotIndicesStarting(
+                at: slotIndex,
+                fillDirection: document.placement.fillDirection
+            )
+        }
+        pendingDraftPageIndex = currentPageIndex
+        updatePendingDraftStatus(
+            successMessage: "Next capture starts at \(document.coordinateLabel(for: slotIndex))"
+        )
         schedulePreviewRefresh(immediate: true)
     }
 
     func selectPlacementRect(from startSlot: Int, to endSlot: Int) {
+        ensureLegacyQueueIsFrozen()
         let columns = document.sheet.columns
         let rows = document.sheet.rows
         guard columns > 0, rows > 0 else { return }
@@ -449,20 +570,267 @@ final class DocumentStore: ObservableObject {
         updateDocument { document in
             document.placement.selectedSlotIndices = indices
         }
+        pendingDraftPageIndex = currentPageIndex
         if let first = indices.first, let last = indices.last {
-            statusMessage = "Selected \(indices.count) slot(s): \(document.coordinateLabel(for: first)) to \(document.coordinateLabel(for: last))"
+            updatePendingDraftStatus(
+                successMessage: "Next capture area: \(document.coordinateLabel(for: first)) to \(document.coordinateLabel(for: last))"
+            )
         } else {
-            statusMessage = "Selected \(indices.count) slot(s) for placement"
+            updatePendingDraftStatus(
+                successMessage: "Selected \(indices.count) slot(s) for the next capture"
+            )
         }
         schedulePreviewRefresh(immediate: true)
     }
 
     func clearPlacementSelection() {
+        ensureLegacyQueueIsFrozen()
         updateDocument { document in
             document.placement.selectedSlotIndices = []
         }
-        statusMessage = "Placement reset to full page"
+        pendingDraftPageIndex = currentPageIndex
+        updatePendingDraftStatus(
+            successMessage: "Next capture area reset to the full page"
+        )
         schedulePreviewRefresh(immediate: true)
+    }
+
+    func updatePlacementFillDirection(_ newDirection: PlacementFillDirection) {
+        ensureLegacyQueueIsFrozen()
+        let oldPlacement = document.placement
+        guard oldPlacement.fillDirection != newDirection else { return }
+        let currentFirstSlot = document.orderedSlotIndices(for: oldPlacement).first
+        let isStartSelection: Bool
+        if let currentFirstSlot, !oldPlacement.selectedSlotIndices.isEmpty {
+            isStartSelection = Set(oldPlacement.selectedSlotIndices) == Set(
+                document.slotIndicesStarting(
+                    at: currentFirstSlot,
+                    fillDirection: oldPlacement.fillDirection
+                )
+            )
+        } else {
+            isStartSelection = false
+        }
+
+        updateDocument { document in
+            document.placement.fillDirection = newDirection
+            if isStartSelection, let currentFirstSlot {
+                document.placement.selectedSlotIndices = document.slotIndicesStarting(
+                    at: currentFirstSlot,
+                    fillDirection: newDirection
+                )
+            }
+        }
+        if pendingDraftPageIndex != nil {
+            updatePendingDraftStatus(
+                successMessage: "Fill order: \(newDirection.label)"
+            )
+        } else {
+            captureQueueIssue = nil
+            statusMessage = "Fill order: \(newDirection.label)"
+        }
+        schedulePreviewRefresh(immediate: true)
+    }
+
+    func enqueueCurrentLabel() {
+        if document.printBatches.contains(where: { $0.capturedPlacement == nil }) {
+            updateDocument(coalescingKey: nil) { document in
+                document.freezeLegacyPrintQueuePlacement()
+            }
+        }
+        let snapshot = prepareRenderableDocument()
+        guard !snapshot.elements.isEmpty else {
+            statusMessage = "Add at least one object before saving a label"
+            return
+        }
+        let capturePageIndex: Int
+        if snapshot.hasQueuedLabels {
+            guard let pendingDraftPageIndex else {
+                let message = "Choose an empty start position for the next capture."
+                captureQueueIssue = message
+                statusMessage = message
+                return
+            }
+            capturePageIndex = pendingDraftPageIndex
+        } else {
+            capturePageIndex = pendingDraftPageIndex ?? currentPageIndex
+        }
+
+        let quantity = snapshot.currentSetupLabelCount
+        let remainingCapacity = max(
+            0,
+            PrintBatch.quantityRange.upperBound - snapshot.queuedLabelCount
+        )
+        guard quantity <= remainingCapacity else {
+            let message = "This capture would exceed the \(PrintBatch.quantityRange.upperBound.formatted())-label queue limit. Reduce End/Repeat Sets or reset the queue."
+            captureQueueIssue = message
+            statusMessage = message
+            return
+        }
+        let batchNumber = snapshot.printBatches.count + 1
+        let batch = PrintBatch(
+            id: UUID(),
+            name: printBatchName(elements: snapshot.elements, fallbackNumber: batchNumber),
+            quantity: quantity,
+            elements: snapshot.elements,
+            serialSettings: snapshot.serial,
+            dataTable: snapshot.dataTable,
+            capturedPlacement: snapshot.placement,
+            startPageIndex: capturePageIndex,
+            startSlotOffset: 0
+        )
+
+        if let conflict = snapshot.firstPlacementConflict(for: batch) {
+            let coordinate = snapshot.coordinateLabel(for: conflict.slotIndex)
+            let message = "Page \(conflict.pageIndex + 1) \(coordinate) is already fixed by “\(conflict.existingBatchName)”. Choose an empty start position for the next capture."
+            captureQueueIssue = message
+            statusMessage = message
+            return
+        }
+
+        updateDocument(coalescingKey: nil) { document in
+            var batches = document.printQueue ?? []
+            batches.append(batch)
+            document.printQueue = batches
+        }
+        pendingDraftPageIndex = nil
+        captureQueueIssue = nil
+        clampCurrentPageIndex()
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Captured \(batch.name) with \(quantity) label(s). Choose another empty position for the next capture."
+    }
+
+    func removePrintBatch(id: UUID) {
+        updateDocument(coalescingKey: nil) { document in
+            var batches = document.printQueue ?? []
+            batches.removeAll { $0.id == id }
+            document.printQueue = batches.isEmpty ? nil : batches
+        }
+        if !document.hasQueuedLabels {
+            pendingDraftPageIndex = currentPageIndex
+        }
+        captureQueueIssue = nil
+        clampCurrentPageIndex()
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Removed label from the print queue"
+    }
+
+    func movePrintBatch(id: UUID, by offset: Int) {
+        guard offset != 0 else { return }
+        updateDocument(coalescingKey: nil) { document in
+            guard var batches = document.printQueue,
+                  let source = batches.firstIndex(where: { $0.id == id })
+            else { return }
+            let destination = min(max(0, source + offset), batches.count - 1)
+            guard destination != source else { return }
+            let batch = batches.remove(at: source)
+            batches.insert(batch, at: destination)
+            document.printQueue = batches
+        }
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Reordered print queue"
+    }
+
+    func clearPrintQueue() {
+        guard !document.printBatches.isEmpty else { return }
+        updateDocument(coalescingKey: nil) { document in
+            document.printQueue = nil
+        }
+        currentPageIndex = 0
+        pendingDraftPageIndex = 0
+        captureQueueIssue = nil
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Reset the capture queue"
+    }
+
+    private func printBatchName(elements: [LabelElement], fallbackNumber: Int) -> String {
+        let firstLine = elements
+            .filter { $0.type == .text }
+            .lazy
+            .flatMap { $0.content.components(separatedBy: .newlines) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+
+        guard let firstLine else { return "Label \(fallbackNumber)" }
+        let limit = 30
+        if firstLine.count <= limit {
+            return firstLine
+        }
+        return "\(firstLine.prefix(limit - 1))…"
+    }
+
+    func normalizeCircleTextFrames(in document: inout LabelDocument) {
+        guard document.sheet.shape == .circle else { return }
+        let safeFrame = document.sheet.textSafeFrame
+        let fullFrame = RectMM(
+            x: 0,
+            y: 0,
+            width: document.sheet.labelWidthMM,
+            height: document.sheet.labelHeightMM
+        )
+        // The previous 680 editor created a centered 92%-size rectangle and
+        // nudged it upward by 0.12 mm. Recognize that exact legacy default
+        // (and the unbiased variant used by other circle formats) so opening
+        // an older project upgrades both its canvas and captured snapshots.
+        let legacyWidth = max(8, document.sheet.labelWidthMM * 0.92)
+        let legacyHeight = max(8, document.sheet.labelHeightMM * 0.92)
+        let legacyX = max(0, (document.sheet.labelWidthMM - legacyWidth) / 2)
+        let legacyY = max(0, (document.sheet.labelHeightMM - legacyHeight) / 2)
+        let legacyCenteredFrame = RectMM(
+            x: legacyX,
+            y: legacyY,
+            width: legacyWidth,
+            height: legacyHeight
+        )
+        let legacy680Frame = RectMM(
+            x: legacyX,
+            y: max(0, legacyY - 0.12),
+            width: legacyWidth,
+            height: legacyHeight
+        )
+
+        func approximatelyEqual(_ lhs: RectMM, _ rhs: RectMM) -> Bool {
+            let tolerance = 0.02
+            return abs(lhs.x - rhs.x) <= tolerance
+                && abs(lhs.y - rhs.y) <= tolerance
+                && abs(lhs.width - rhs.width) <= tolerance
+                && abs(lhs.height - rhs.height) <= tolerance
+        }
+
+        func normalized(_ elements: [LabelElement]) -> [LabelElement] {
+            elements.map { element in
+                guard element.type == .text else { return element }
+                var copy = element
+                let isLegacyCircularFrame = element.usesCircularTextFlow == nil
+                    && (
+                        approximatelyEqual(element.frame, safeFrame)
+                        || approximatelyEqual(element.frame, fullFrame)
+                        || approximatelyEqual(element.frame, legacyCenteredFrame)
+                        || (
+                            document.formatCode == "680"
+                            && approximatelyEqual(element.frame, legacy680Frame)
+                        )
+                    )
+                if element.usesCircularTextFlow == true || isLegacyCircularFrame {
+                    copy.usesCircularTextFlow = true
+                    copy.frame = fullFrame
+                } else {
+                    copy.frame = element.frame.clamped(
+                        maxWidth: document.sheet.labelWidthMM,
+                        maxHeight: document.sheet.labelHeightMM
+                    )
+                }
+                return copy
+            }
+        }
+
+        document.elements = normalized(document.elements)
+        if var batches = document.printQueue {
+            for index in batches.indices {
+                batches[index].elements = normalized(batches[index].elements)
+            }
+            document.printQueue = batches
+        }
     }
 
     func newDocument() {
@@ -472,6 +840,7 @@ final class DocumentStore: ObservableObject {
             applyOfficialFormat(defaultFormat, updateTitle: true)
         }
         currentPageIndex = 0
+        pendingDraftPageIndex = 0
         projectURL = nil
         selectedElementID = document.elements.first?.id
         editingElementID = nil
@@ -481,6 +850,10 @@ final class DocumentStore: ObservableObject {
     }
 
     func applyPreset(id: String) {
+        guard !document.hasQueuedLabels else {
+            statusMessage = "Reset the capture queue before changing label format"
+            return
+        }
         guard let preset = SheetTemplate.presets.first(where: { $0.id == id }) else {
             return
         }
@@ -503,6 +876,10 @@ final class DocumentStore: ObservableObject {
     }
 
     func applyOfficialFormat(_ format: OfficialFormatDefinition, updateTitle: Bool) {
+        guard !document.hasQueuedLabels else {
+            statusMessage = "Reset the capture queue before changing label format"
+            return
+        }
         let shouldResetToBlankCanvas = document.elements.isEmpty || document.elements == LabelDocument.starter.elements
         updateDocument { document in
             document.sheet = format.sheetTemplate
@@ -510,6 +887,7 @@ final class DocumentStore: ObservableObject {
             document.formatFamily = format.family
             document.formatSourceURL = format.detailURL
             document.formatPDFTemplateURL = format.pdfTemplateURL
+            normalizeCircleTextFrames(in: &document)
             if shouldResetToBlankCanvas {
                 document.elements = []
             }
@@ -547,20 +925,26 @@ final class DocumentStore: ObservableObject {
 
         let elementWidth: Double
         let elementHeight: Double
+        let centeredX: Double
+        let centeredY: Double
         switch document.sheet.shape {
         case .circle:
-            elementWidth = max(8, document.sheet.labelWidthMM * 0.92)
-            elementHeight = max(8, document.sheet.labelHeightMM * 0.92)
+            elementWidth = document.sheet.labelWidthMM
+            elementHeight = document.sheet.labelHeightMM
+            centeredX = 0
+            centeredY = 0
+            element.usesCircularTextFlow = true
         case .capsule:
             elementWidth = max(10, document.sheet.labelWidthMM * 0.90)
             elementHeight = max(8, document.sheet.labelHeightMM * 0.82)
+            centeredX = max(0, (document.sheet.labelWidthMM - elementWidth) / 2)
+            centeredY = max(0, (document.sheet.labelHeightMM - elementHeight) / 2)
         case .rectangle, .roundedRectangle:
             elementWidth = max(10, document.sheet.labelWidthMM * 0.90)
             elementHeight = max(8, document.sheet.labelHeightMM * 0.78)
+            centeredX = max(0, (document.sheet.labelWidthMM - elementWidth) / 2)
+            centeredY = max(0, (document.sheet.labelHeightMM - elementHeight) / 2)
         }
-        let centeredX = max(0, (document.sheet.labelWidthMM - elementWidth) / 2)
-        let verticalBias: Double = (document.formatCode == "680" && document.sheet.shape == .circle) ? -0.12 : 0
-        let centeredY = max(0, (document.sheet.labelHeightMM - elementHeight) / 2 + verticalBias)
 
         element.frame = RectMM(
             x: centeredX,
@@ -584,6 +968,36 @@ final class DocumentStore: ObservableObject {
         return element
     }
 
+    func fitSelectedTextToLabel() {
+        guard let selectedElement, selectedElement.type == .text else { return }
+        let sheet = document.sheet
+        updateSelected { element in
+            if sheet.shape == .circle {
+                element.frame = RectMM(
+                    x: 0,
+                    y: 0,
+                    width: sheet.labelWidthMM,
+                    height: sheet.labelHeightMM
+                )
+                element.usesCircularTextFlow = true
+            } else {
+                let width = min(element.frame.width, sheet.labelWidthMM)
+                let height = min(element.frame.height, sheet.labelHeightMM)
+                element.frame = RectMM(
+                    x: max(0, (sheet.labelWidthMM - width) / 2),
+                    y: max(0, (sheet.labelHeightMM - height) / 2),
+                    width: width,
+                    height: height
+                )
+                element.usesCircularTextFlow = false
+            }
+            element.textAlignment = .center
+        }
+        statusMessage = sheet.shape == .circle
+            ? "Fitted text to the full circular label"
+            : "Centered text in the label"
+    }
+
     func duplicateSelected() {
         guard var copy = selectedElement else { return }
         recordUndo(coalescingKey: nil)
@@ -592,6 +1006,16 @@ final class DocumentStore: ObservableObject {
         copy.frame.x += 3
         copy.frame.y += 3
         copy.frame = copy.frame.clamped(maxWidth: document.sheet.labelWidthMM, maxHeight: document.sheet.labelHeightMM)
+        if document.sheet.shape == .circle,
+           copy.type == .text,
+           copy.usesCircularTextFlow == true {
+            copy.frame = RectMM(
+                x: 0,
+                y: 0,
+                width: document.sheet.labelWidthMM,
+                height: document.sheet.labelHeightMM
+            )
+        }
         document.elements.append(copy)
         selectedElementID = copy.id
         editingElementID = nil
@@ -615,7 +1039,10 @@ final class DocumentStore: ObservableObject {
     }
 
     func movePage(delta: Int) {
-        currentPageIndex = min(max(0, currentPageIndex + delta), document.pageCount - 1)
+        currentPageIndex = min(
+            max(0, currentPageIndex + delta),
+            max(0, navigationPageCount - 1)
+        )
     }
 
     func openProject() {
@@ -631,12 +1058,14 @@ final class DocumentStore: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             var loaded = try JSONDecoder().decode(LabelDocument.self, from: data)
+            loaded.freezeLegacyPrintQueuePlacement()
             // Register bundled custom fonts (process scope) so missing fonts
             // resolve to the original faces, then drop the bytes from memory.
             FontEmbedder.register(loaded.embeddedFonts)
             loaded.embeddedFonts = nil
             document = loaded
             document.clampElementsToSheet()
+            normalizeCircleTextFrames(in: &document)
             // Wi-Fi print setup follows the machine, not the file — opening
             // an old project must not flip off "Switch Wi-Fi on Print" or
             // revert the printer credentials configured on this Mac.
@@ -649,6 +1078,7 @@ final class DocumentStore: ObservableObject {
             selectedElementID = document.elements.first?.id
             editingElementID = nil
             currentPageIndex = 0
+            pendingDraftPageIndex = document.hasQueuedLabels ? nil : 0
             clearUndoHistory()
             schedulePreviewRefresh(immediate: true)
             statusMessage = "Opened \(url.lastPathComponent)"
@@ -781,9 +1211,20 @@ final class DocumentStore: ObservableObject {
     }
 
     func printCurrentPage() {
+        submitPrint(allPages: false)
+    }
+
+    func printAllPages() {
+        submitPrint(allPages: true)
+    }
+
+    private func submitPrint(allPages: Bool) {
         let snapshot = prepareRenderableDocument()
         let pageIndex = currentPageIndex
         let settings = document.printAutomation
+        let outputDescription = allPages
+            ? "\(snapshot.pageCount) page\(snapshot.pageCount == 1 ? "" : "s")"
+            : "page \(pageIndex + 1)"
 
         // The dialog runs on the user's normal network; the printer's Wi-Fi
         // is only needed for the transmission itself. So: submit first, then
@@ -803,7 +1244,11 @@ final class DocumentStore: ObservableObject {
             let baselineJobs = WiFiPrintAutomation.pendingJobIDs() ?? []
 
             let didSubmit = await MainActor.run {
-                PageRenderer.print(document: snapshot, pageIndex: pageIndex)
+                if allPages {
+                    PageRenderer.printAllPages(document: snapshot)
+                } else {
+                    PageRenderer.print(document: snapshot, pageIndex: pageIndex)
+                }
             }
 
             guard didSubmit else {
@@ -818,7 +1263,7 @@ final class DocumentStore: ObservableObject {
                 await MainActor.run {
                     refreshCurrentWiFiSSID()
                     wifiTestStatus = "Printed without Wi-Fi switching"
-                    statusMessage = "Sent page \(pageIndex + 1) to print dialog"
+                    statusMessage = "Sent \(outputDescription) to one print dialog"
                 }
                 return
             }
@@ -831,7 +1276,7 @@ final class DocumentStore: ObservableObject {
                 await MainActor.run {
                     refreshCurrentWiFiSSID()
                     wifiTestStatus = "Printed without switching (printer reachable directly)"
-                    statusMessage = "Printed page \(pageIndex + 1) — no Wi-Fi switch needed"
+                    statusMessage = "Printed \(outputDescription) — no Wi-Fi switch needed"
                 }
                 return
             }
@@ -900,7 +1345,7 @@ final class DocumentStore: ObservableObject {
     }
 
     private func prepareRenderableDocument() -> LabelDocument {
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        NSApplication.shared.keyWindow?.makeFirstResponder(nil)
         finishInlineEditing()
         schedulePreviewRefresh(immediate: true)
         return document
