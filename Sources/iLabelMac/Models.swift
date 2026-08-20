@@ -631,6 +631,55 @@ struct LabelElement: Codable, Identifiable, Hashable {
         ) ?? data
     }
 
+    /// Repaints every run in an RTF payload. Used when the color is changed
+    /// element-wide, so a single color stays authoritative everywhere instead
+    /// of applying only to newly typed characters.
+    static func rewritingForegroundColor(of data: Data?, to color: RGBAColor) -> Data? {
+        guard let data, let decoded = RTFDecodeCache.decode(data) else { return data }
+        let mutable = NSMutableAttributedString(attributedString: decoded)
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        mutable.addAttribute(.foregroundColor, value: color.nsColor, range: fullRange)
+        return mutable.rtf(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) ?? data
+    }
+
+    /// True when the runs deliberately carry more than one color.
+    ///
+    /// Color is element-wide by default: the element's `foreground` overrides
+    /// every run when rendering, which is what makes an inspector change repaint
+    /// existing text. Once the user colors a selection, that override would
+    /// erase their work, so it is suspended exactly for multi-color text —
+    /// which also leaves single-color documents (every label made before this
+    /// feature) behaving as before.
+    static func usesPerRunForegroundColor(_ attributed: NSAttributedString) -> Bool {
+        guard attributed.length > 0 else { return false }
+        var seen: NSColor?
+        var multiple = false
+        attributed.enumerateAttribute(
+            .foregroundColor,
+            in: NSRange(location: 0, length: attributed.length),
+            options: []
+        ) { value, _, stop in
+            guard let color = (value as? NSColor)?.usingColorSpace(.deviceRGB) else { return }
+            if let seen {
+                // Compare components: NSColor equality is unreliable across
+                // color spaces and an RTF round trip.
+                if abs(seen.redComponent - color.redComponent) > 0.001
+                    || abs(seen.greenComponent - color.greenComponent) > 0.001
+                    || abs(seen.blueComponent - color.blueComponent) > 0.001
+                    || abs(seen.alphaComponent - color.alphaComponent) > 0.001 {
+                    multiple = true
+                    stop.pointee = true
+                }
+            } else {
+                seen = color
+            }
+        }
+        return multiple
+    }
+
     static func make(_ type: ElementType, index: Int) -> LabelElement {
         switch type {
         case .text:

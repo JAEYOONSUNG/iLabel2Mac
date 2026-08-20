@@ -15,6 +15,7 @@ enum TextStyleAction: Equatable {
     case underline
     case fontFamily(String)
     case fontSize(Double)
+    case textColor(RGBAColor)
 }
 
 /// Carries a style action to the active inline editor. Notification posting
@@ -450,6 +451,12 @@ final class DocumentStore: ObservableObject {
                 let ratio = size / max(element.fontSize, 0.1)
                 element.fontSize = size
                 element.richTextRTF = LabelElement.scalingFontSizes(of: element.richTextRTF, by: ratio)
+            case .textColor(let color):
+                // Element-wide means "repaint everything": rewrite the runs too,
+                // which also drops any per-selection colors, so the element is
+                // back to a single color the inspector fully controls.
+                element.foreground = color
+                element.richTextRTF = LabelElement.rewritingForegroundColor(of: element.richTextRTF, to: color)
             }
         }
     }

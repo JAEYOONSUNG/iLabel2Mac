@@ -179,6 +179,9 @@ enum TextLayoutRenderer {
         mutable.beginEditing()
         // Enumerate the immutable source, not `mutable` (mutating the string
         // being enumerated can re-visit ranges).
+        // Per-selection colors outrank the element color; single-color text
+        // keeps the old behavior where the inspector repaints everything.
+        let keepRunColors = LabelElement.usesPerRunForegroundColor(attributed)
         attributed.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
             var updated = attributes
             // Runs keep their own family AND size: both can differ per
@@ -200,7 +203,9 @@ enum TextLayoutRenderer {
             paragraph.alignment = element.textAlignment.nsTextAlignment
             updated[.paragraphStyle] = paragraph
 
-            updated[.foregroundColor] = element.foreground.nsColor
+            if !keepRunColors || attributes[.foregroundColor] == nil {
+                updated[.foregroundColor] = element.foreground.nsColor
+            }
             if updated[.underlineStyle] == nil {
                 updated[.underlineStyle] = element.isUnderline ? NSUnderlineStyle.single.rawValue : 0
             }

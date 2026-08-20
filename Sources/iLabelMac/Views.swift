@@ -747,6 +747,9 @@ struct EditorPane: View {
 
 struct InspectorView: View {
     @ObservedObject var store: DocumentStore
+    // Remembered per user: these are set once and then ignored for weeks.
+    @AppStorage("inspector.notesExpanded") private var notesExpanded = false
+    @AppStorage("inspector.wifiExpanded") private var wifiExpanded = false
 
     private var availableFontFamilies: [String] {
         installedFontFamilies
@@ -754,16 +757,17 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CompactNumberingSection(store: store)
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 10)
-
-            Divider()
-
+            // Numbering and capture moved next to the print preview they drive,
+            // so this panel is now only about the selected object plus two
+            // rarely-touched settings groups, which stay collapsed.
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                // Page mode hides the preview column that normally hosts these,
+                // so they come back here rather than becoming unreachable.
+                if store.canvasMode != .label {
+                    CompactNumberingSection(store: store)
                     PrintQueueSection(store: store)
+                }
 
                 if let selected = store.selectedElement {
                     GroupBox("Selected Object") {
@@ -851,8 +855,8 @@ struct InspectorView: View {
                                 height: selectedBinding(\.frame.height, defaultValue: 10)
                             )
 
-                            NumberRow(title: "Rotation", value: selectedBinding(\.rotation, defaultValue: 0), suffix: "deg")
-                            NumberRow(title: "Opacity", value: selectedBinding(\.opacity, defaultValue: 1))
+                            NumberRow(title: "Rotation", value: selectedBinding(\.rotation, defaultValue: 0), suffix: "deg", step: 1)
+                            NumberRow(title: "Opacity", value: selectedBinding(\.opacity, defaultValue: 1), suffix: "", step: 0.05, range: 0...1)
 
                             if selected.type == .text {
                                 Button {
@@ -945,8 +949,22 @@ struct InspectorView: View {
                                 }
                             }
 
-                            ColorRow(title: "Foreground", selection: selectedColorBinding(\.foreground, defaultValue: .black))
-                                .opacity(selected.type == .rectangle || selected.type == .image ? 0.4 : 1)
+                            if selected.type == .text {
+                                // Routed through the style action so it colors
+                                // the selected characters while editing, and the
+                                // whole element otherwise — same rule as
+                                // font/size.
+                                ColorRow(
+                                    title: "Text color",
+                                    selection: Binding(
+                                        get: { store.selectedElement?.foreground.color ?? RGBAColor.black.color },
+                                        set: { store.applyTextStyleAction(.textColor(RGBAColor($0))) }
+                                    )
+                                )
+                            } else {
+                                ColorRow(title: "Foreground", selection: selectedColorBinding(\.foreground, defaultValue: .black))
+                                    .opacity(selected.type == .rectangle || selected.type == .image ? 0.4 : 1)
+                            }
                             ColorRow(title: "Background", selection: selectedColorBinding(\.background, defaultValue: .clear))
                             ColorRow(title: "Stroke", selection: selectedColorBinding(\.stroke, defaultValue: .clear))
                             NumberRow(title: "Stroke pt", value: selectedBinding(\.strokeWidth, defaultValue: 0))
@@ -961,7 +979,7 @@ struct InspectorView: View {
                     }
                 }
 
-                GroupBox("Project Notes") {
+                DisclosureGroup("Project Notes", isExpanded: $notesExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         TextEditor(text: documentBinding(\.notes))
                             .font(.system(size: 12))
@@ -973,7 +991,7 @@ struct InspectorView: View {
                     }
                 }
 
-                GroupBox("Wi-Fi Print") {
+                DisclosureGroup("Wi-Fi Print", isExpanded: $wifiExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Switch Wi-Fi on Print", isOn: printBinding(\.enabled))
 
@@ -1387,21 +1405,41 @@ struct CommitNumberField: View {
     let title: String
     let value: Double
     let onCommit: (Double) -> Void
+    var step: Double = 0.5
+    /// commit() already rejects anything <= 0.1; the arrows honour the same floor.
+    var minimum: Double = 0.5
 
     @State private var text = ""
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField(title, text: $text)
-            .focused($isFocused)
-            .onAppear { text = Self.format(value) }
-            .onChange(of: value) { _, newValue in
-                if !isFocused { text = Self.format(newValue) }
-            }
-            .onChange(of: isFocused) { _, focused in
-                if !focused { commit() }
-            }
-            .onSubmit { commit() }
+        HStack(spacing: 4) {
+            TextField(title, text: $text)
+                .focused($isFocused)
+                .onAppear { text = Self.format(value) }
+                .onChange(of: value) { _, newValue in
+                    if !isFocused { text = Self.format(newValue) }
+                }
+                .onChange(of: isFocused) { _, focused in
+                    if !focused { commit() }
+                }
+                .onSubmit { commit() }
+            Stepper(title, onIncrement: { nudge(step) }, onDecrement: { nudge(-step) })
+                .labelsHidden()
+        }
+    }
+
+    /// Steps from what is currently in the box, so arrows continue from a value
+    /// typed but not yet committed rather than snapping back to the old one.
+    private func nudge(_ delta: Double) {
+        let base = Double(text.replacingOccurrences(of: ",", with: ".")) ?? value
+        let next = ((base + delta) * 1000).rounded() / 1000
+        guard next >= minimum else {
+            text = Self.format(value)
+            return
+        }
+        text = Self.format(next)
+        onCommit(next)
     }
 
     private func commit() {
@@ -2117,6 +2155,9 @@ struct AppKitInlineTextField: NSViewRepresentable {
     private func normalizedStorageAttributedString(_ attributed: NSAttributedString) -> NSAttributedString {
         let mutable = NSMutableAttributedString(attributedString: attributed)
         let fullRange = NSRange(location: 0, length: mutable.length)
+        // Per-selection colors are the one case where a run outranks the
+        // element-wide color; see LabelElement.usesPerRunForegroundColor.
+        let keepRunColors = LabelElement.usesPerRunForegroundColor(attributed)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = alignment.nsTextAlignment
         mutable.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
@@ -2126,7 +2167,9 @@ struct AppKitInlineTextField: NSViewRepresentable {
             if attributes[.font] == nil {
                 updated[.font] = resolvedNSFont(name: fontName, size: max(0.1, storageFontSize), isBold: isBold, isItalic: isItalic)
             }
-            updated[.foregroundColor] = foreground
+            if !keepRunColors || attributes[.foregroundColor] == nil {
+                updated[.foregroundColor] = foreground
+            }
             updated[.paragraphStyle] = paragraph
             if updated[.underlineStyle] == nil {
                 updated[.underlineStyle] = isUnderline ? NSUnderlineStyle.single.rawValue : 0
@@ -2245,7 +2288,7 @@ struct AppKitInlineTextField: NSViewRepresentable {
             // also keeps element.fontName/fontSize (and the inspector fields)
             // in sync. B/I/U keep their old apply-to-all behavior here.
             switch action {
-            case .fontFamily, .fontSize:
+            case .fontFamily, .fontSize, .textColor:
                 guard hasExplicitSelection else { return }
             case .bold, .italic, .underline:
                 break
@@ -2284,6 +2327,8 @@ struct AppKitInlineTextField: NSViewRepresentable {
                     let displayScale = self.parent.fontSize / max(self.parent.storageFontSize, 0.1)
                     let currentFont = (attributes[.font] as? NSFont) ?? resolvedNSFont(name: self.parent.fontName, size: self.parent.fontSize, isBold: self.parent.isBold, isItalic: self.parent.isItalic)
                     updatedAttributes[.font] = currentFont.withSize(max(0.5, CGFloat(storagePoints) * displayScale))
+                case .textColor(let color):
+                    updatedAttributes[.foregroundColor] = color.nsColor
                 }
                 textStorage.setAttributes(updatedAttributes, range: range)
             }
@@ -2319,16 +2364,35 @@ struct LivePagePreviewPanel: View {
         // publishes on every keystroke, but the full-slot grid only needs to
         // re-render when the throttled previewDocument (or the selection)
         // actually changes.
-        LivePagePreviewBody(
-            document: store.previewDocument,
-            pageIndex: store.currentPageIndex,
-            draftPlan: store.pendingDraftPlan,
-            pageCount: store.document.pageCount,
-            onTapSlot: { store.selectPlacementStart(at: $0) },
-            onDragSlots: { store.selectPlacementRect(from: $0, to: $1) },
-            onResetArea: { store.clearPlacementSelection() }
-        )
-        .equatable()
+        VStack(spacing: 0) {
+            LivePagePreviewBody(
+                document: store.previewDocument,
+                pageIndex: store.currentPageIndex,
+                draftPlan: store.pendingDraftPlan,
+                pageCount: store.document.pageCount,
+                onTapSlot: { store.selectPlacementStart(at: $0) },
+                onDragSlots: { store.selectPlacementRect(from: $0, to: $1) },
+                onResetArea: { store.clearPlacementSelection() }
+            )
+            .equatable()
+
+            Divider()
+
+            // Numbering and capture decide what this preview will print, so
+            // they live under it. (This space used to hold a row-by-row print
+            // list, which for a numbered run just repeats one label N times.)
+            // They stay outside the equatable body above, which is deliberately
+            // fed plain values so it does not re-render on every keystroke.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    CompactNumberingSection(store: store)
+                    PrintQueueSection(store: store)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+            .frame(maxHeight: 320)
+        }
     }
 }
 
@@ -2377,12 +2441,6 @@ struct LivePagePreviewBody: View, Equatable {
             conflictSlots.count,
             draftConflict == nil ? 0 : 1
         )
-        let printListEntries = makePrintListEntries(
-            document: document,
-            pageIndex: pageIndex,
-            slots: capturedSlotList
-        )
-
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Print Preview")
@@ -2446,93 +2504,9 @@ struct LivePagePreviewBody: View, Equatable {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-
-            Divider()
-
-            HStack {
-                Text(document.hasQueuedLabels
-                    ? "Captured Print List"
-                    : "Print List")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Text("\(printListEntries.count) item(s)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(printListEntries, id: \.slotIndex) { entry in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(entry.coordinate)
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .frame(width: 48, alignment: .leading)
-                                .foregroundStyle(.secondary)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.primary)
-                                    .font(.system(size: 11))
-                                    .lineLimit(3)
-                                if let secondary = entry.secondary, !secondary.isEmpty {
-                                    Text(secondary)
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(nsColor: .textBackgroundColor).opacity(0.7))
-                        )
-                    }
-                }
-            }
-            .frame(minHeight: 88, maxHeight: 130)
         }
         .padding(14)
     }
-
-    private func makePrintListEntries(document: LabelDocument, pageIndex: Int, slots: [Int]) -> [PrintListEntry] {
-        return slots.compactMap { slotIndex in
-            let payload = document.renderPayload(slotIndex: slotIndex, pageIndex: pageIndex)
-            let context = payload.context
-            guard context.isActive || !document.hasFiniteMergeRows else { return nil }
-
-            let textLines = payload.elements
-                .filter { $0.type == .text }
-                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: payload.serialSettings) }
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-
-            let codeLines = payload.elements
-                .filter { $0.type == .qrCode || $0.type == .code128 }
-                .map { MergeRenderer.resolve($0.content, context: context, serialSettings: payload.serialSettings) }
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-
-            let primary = textLines.first ?? codeLines.first ?? "(empty)"
-            let secondaryParts = Array(textLines.dropFirst()) + codeLines.prefix(2)
-            let secondary = secondaryParts.isEmpty ? nil : secondaryParts.joined(separator: " · ")
-
-            return PrintListEntry(
-                slotIndex: slotIndex,
-                coordinate: document.coordinateLabel(for: slotIndex),
-                primary: primary,
-                secondary: secondary
-            )
-        }
-    }
-}
-
-struct PrintListEntry {
-    let slotIndex: Int
-    let coordinate: String
-    let primary: String
-    let secondary: String?
 }
 
 struct PagePreviewCanvas: View {
@@ -3046,6 +3020,10 @@ struct NumberRow: View {
     let title: String
     let value: Binding<Double>
     var suffix: String = "mm"
+    /// Nudge size for the arrows. 0.5 suits millimetres and points; callers
+    /// whose unit has a different natural grain (opacity, degrees) pass their own.
+    var step: Double = 0.5
+    var range: ClosedRange<Double>? = nil
 
     var body: some View {
         HStack {
@@ -3055,6 +3033,8 @@ struct NumberRow: View {
             TextField(title, value: value, formatter: UIFormatters.decimal)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 86)
+            Stepper(title, value: SteppedValue.binding(value, range: range), step: step)
+                .labelsHidden()
             Text(suffix)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -3063,17 +3043,36 @@ struct NumberRow: View {
     }
 }
 
+/// Keeps arrow-driven edits inside a field's valid range and off floating-point
+/// dust (0.1 + 0.2 style drift shows up immediately when stepping by halves).
+enum SteppedValue {
+    static func binding(_ value: Binding<Double>, range: ClosedRange<Double>?) -> Binding<Double> {
+        Binding(
+            get: { value.wrappedValue },
+            set: { newValue in
+                let rounded = (newValue * 1000).rounded() / 1000
+                value.wrappedValue = range.map { min(max(rounded, $0.lowerBound), $0.upperBound) } ?? rounded
+            }
+        )
+    }
+}
+
 struct NumberField: View {
     let label: String
     let value: Binding<Double>
+    var step: Double = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            TextField(label, value: value, formatter: UIFormatters.decimal)
-                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 4) {
+                TextField(label, value: value, formatter: UIFormatters.decimal)
+                    .textFieldStyle(.roundedBorder)
+                Stepper(label, value: SteppedValue.binding(value, range: nil), step: step)
+                    .labelsHidden()
+            }
         }
     }
 }
