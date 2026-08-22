@@ -83,10 +83,13 @@ jobs:
             asar_path="release/linux-unpacked/resources/app.asar"
           fi
           test -f "$asar_path"
-          asar_listing="$(npx --no-install asar list "$asar_path")"
-          grep -Fqx '/dist/index.html' <<<"$asar_listing"
-          grep -Fqx '/dist-electron/main.js' <<<"$asar_listing"
-          grep -Fqx '/dist-electron/preload.js' <<<"$asar_listing"
+          node -e '
+            const asar = require("@electron/asar");
+            const files = asar.listPackage(process.argv[1]);
+            for (const file of ["/dist/index.html", "/dist-electron/main.js", "/dist-electron/preload.js"]) {
+              if (!files.includes(file)) throw new Error(`Missing packaged file: ${file}`);
+            }
+          ' "$asar_path"
 
       - name: Smoke test Windows package
         if: runner.os == 'Windows'
