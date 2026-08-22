@@ -85,9 +85,10 @@ jobs:
           test -f "$asar_path"
           node -e '
             const asar = require("@electron/asar");
-            const files = asar.listPackage(process.argv[1]);
-            for (const file of ["/dist/index.html", "/dist-electron/main.js", "/dist-electron/preload.js"]) {
-              if (!files.includes(file)) throw new Error(`Missing packaged file: ${file}`);
+            for (const file of ["dist/index.html", "dist-electron/main.js", "dist-electron/preload.js"]) {
+              if (asar.extractFile(process.argv[1], file).length === 0) {
+                throw new Error(`Empty packaged file: ${file}`);
+              }
             }
           ' "$asar_path"
 
