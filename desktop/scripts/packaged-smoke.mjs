@@ -213,7 +213,11 @@ try {
     document.dispatchEvent(new Event('selectionchange'));
     const button = [...document.querySelectorAll('.style-buttons button')]
       .find((candidate) => candidate.textContent.trim() === 'Bold');
+    button.scrollIntoView({ block: 'center', inline: 'nearest' });
     const bounds = button.getBoundingClientRect();
+    if (bounds.left < 0 || bounds.top < 0 || bounds.right > innerWidth || bounds.bottom > innerHeight) {
+      throw new Error('Bold button is outside the packaged viewport.');
+    }
     return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
   })()`);
   await command("Input.dispatchMouseEvent", { type: "mousePressed", ...boldPoint, button: "left", clickCount: 1 });
@@ -240,6 +244,7 @@ try {
     const sizeInput = [...document.querySelectorAll('.field-label')]
       .find((label) => label.querySelector('span')?.textContent.trim() === 'Size · pt')
       .querySelector('input');
+    sizeInput.scrollIntoView({ block: 'center', inline: 'nearest' });
     sizeInput.focus();
     sizeInput.select();
   })()`);
@@ -248,7 +253,9 @@ try {
   await delay(350);
   const richText = await evaluate(`(() => {
     const selected = [...document.querySelectorAll('.label-board .svg-surface [data-element-type="text"] text tspan tspan')];
-    const bold = selected.find((node) => node.getAttribute('font-weight') === '700');
+    const boldTexts = selected
+      .filter((node) => node.getAttribute('font-weight') === '700')
+      .map((node) => node.textContent);
     const sized = selected.find((node) => node.textContent === 'A');
     const lines = [...document.querySelectorAll('.label-board .svg-surface [data-element-type="text"] [data-available-width]')];
     const lineOverflows = lines
@@ -268,7 +275,8 @@ try {
     } : { left: 6, right: 6, top: 6, bottom: 6 };
     return {
       content: document.querySelector('.rich-text-editor').innerText,
-      boldText: bold?.textContent,
+      boldTexts,
+      leadingABold: sized?.getAttribute('font-weight') === '700',
       sizedText: sized?.textContent,
       sizedPoints: Number(sized?.getAttribute('font-size')) * 72 / 25.4,
       lineOverflows,
@@ -283,7 +291,10 @@ try {
     richText.content === "A{{serial}}B",
     `Rich text content changed unexpectedly: ${JSON.stringify(richText)}`,
   );
-  assert(richText.boldText?.includes("(1)"), "Selection-level bold did not survive RTF/token rendering.");
+  assert(
+    richText.boldTexts.some((text) => text?.includes("(1)")) && !richText.leadingABold,
+    `Selection-level bold did not survive RTF/token rendering: ${JSON.stringify(richText)}`,
+  );
   assert(
     richText.sizedText === "A" && Math.abs(richText.sizedPoints - 18) <= 0.1,
     `Selection-level point size was not applied exactly: ${JSON.stringify(richText)}`,
@@ -312,6 +323,7 @@ try {
     const sizeInput = [...document.querySelectorAll('.field-label')]
       .find((label) => label.querySelector('span')?.textContent.trim() === 'Size · pt')
       .querySelector('input');
+    sizeInput.scrollIntoView({ block: 'center', inline: 'nearest' });
     sizeInput.focus();
     sizeInput.select();
   })()`);
@@ -337,7 +349,11 @@ try {
     document.dispatchEvent(new Event('selectionchange'));
     const token = [...document.querySelectorAll('.token-cloud button')]
       .find((button) => button.textContent.trim() === '{{time}}');
+    token.scrollIntoView({ block: 'center', inline: 'nearest' });
     const bounds = token.getBoundingClientRect();
+    if (bounds.left < 0 || bounds.top < 0 || bounds.right > innerWidth || bounds.bottom > innerHeight) {
+      throw new Error('Token button is outside the packaged viewport.');
+    }
     return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
   })()`);
   await command("Input.dispatchMouseEvent", { type: "mousePressed", ...tokenPoint, button: "left", clickCount: 1 });

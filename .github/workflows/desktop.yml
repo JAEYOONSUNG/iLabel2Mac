@@ -83,9 +83,10 @@ jobs:
             asar_path="release/linux-unpacked/resources/app.asar"
           fi
           test -f "$asar_path"
-          npx --no-install asar list "$asar_path" | grep -q '^/dist/index.html$'
-          npx --no-install asar list "$asar_path" | grep -q '^/dist-electron/main.js$'
-          npx --no-install asar list "$asar_path" | grep -q '^/dist-electron/preload.js$'
+          asar_listing="$(npx --no-install asar list "$asar_path")"
+          grep -Fqx '/dist/index.html' <<<"$asar_listing"
+          grep -Fqx '/dist-electron/main.js' <<<"$asar_listing"
+          grep -Fqx '/dist-electron/preload.js' <<<"$asar_listing"
 
       - name: Smoke test Windows package
         if: runner.os == 'Windows'
