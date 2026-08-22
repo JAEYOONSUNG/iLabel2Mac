@@ -38,6 +38,18 @@ npm run package:linux  # run on Linux
 
 For development, use Node.js 22 and run `npm run dev` in `desktop/`. The workflow launches each packaged executable—not only the development server—and verifies the renderer, preload bridge, 1,006-format catalog, rich text, embedded fonts, PDF dimensions, circular layout, placement selection, and capture queue before publishing artifacts.
 
+## Quick workflow: quantities and consecutive captures
+
+![Adjust label quantities and capture multiple print runs](docs/assets/capture-queue-workflow.gif)
+
+The demo captures **8 labels** (`End 4 × Repeat 2`), then changes the setup and captures **3 more labels** (`End 3 × Repeat 1`).
+
+1. Set the quantity with **Start**, **End**, **Step**, and **Repeat**. With CSV data, one label is generated per imported row.
+2. Click a slot in **Page Preview** to choose where the run starts.
+3. Choose **Capture current setup**. The artwork, data, quantity, page, and start position are locked together.
+4. Adjust the next run's quantity and capture again. iLabel2 automatically stages it on the next available sheet.
+5. Reorder or remove captured runs if needed, then choose **Print captures** to print the complete queue as one multi-page job.
+
 ## Features
 
 - Native SwiftUI app for macOS and a feature-equivalent Electron app for Windows/Linux
