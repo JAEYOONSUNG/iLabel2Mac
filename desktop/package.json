@@ -20,6 +20,7 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run --passWithNoTests",
+    "demo:readme": "npm run build && node scripts/capture-readme-demo.mjs",
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win nsis portable --x64",
     "package:linux": "npm run build && electron-builder --linux AppImage deb --x64"

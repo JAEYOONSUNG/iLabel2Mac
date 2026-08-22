@@ -47,6 +47,7 @@ const api = Object.freeze({
   print: (request: PrintableHTMLRequest) => ipcRenderer.invoke("output:print", request),
   waitForPrintDrain: (request: PrintDrainRequest) => ipcRenderer.invoke("output:wait-for-print-drain", request),
   getOSInfo: () => ipcRenderer.invoke("system:os-info"),
+  setTheme: (theme: "light" | "dark" | "system") => ipcRenderer.invoke("system:set-theme", theme),
   wifi: Object.freeze({
     getStatus: () => ipcRenderer.invoke("wifi:status"),
     test: (request: WifiTestRequest) => ipcRenderer.invoke("wifi:test", request),

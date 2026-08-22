@@ -39,6 +39,7 @@ const MAX_EMBEDDED_FONT_FACES = 64;
 const MAX_EMBEDDED_FONT_BYTES = 32 * 1024 * 1024;
 const MAX_TOTAL_EMBEDDED_FONT_BYTES = 64 * 1024 * 1024;
 const MAX_EMBEDDED_FONT_NAME_LENGTH = 256;
+const PREVIEW_GUIDE_STROKE_PX = 1.25;
 const BASE64_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 let textMeasurementContext: CanvasRenderingContext2D | null | undefined;
@@ -64,6 +65,8 @@ export interface SVGRenderOptions {
   now?: Date;
   /** Draw non-printing label outlines for an editor preview. */
   showGuides?: boolean;
+  /** Preview one blank staging page immediately after the rendered document. */
+  allowEmptyPage?: boolean;
   guideColor?: RGBAColor;
   /** Undefined is opaque white; null leaves the SVG background transparent. */
   backgroundColor?: RGBAColor | null;
@@ -478,6 +481,17 @@ function strokeAttributes(color: RGBAColor, widthPoints: number): string {
   if (widthMM <= 0 || alpha <= 0) return 'stroke="none"';
   const opacity = alpha < 1 ? ` stroke-opacity="${number(alpha)}"` : "";
   return `stroke="${colorHex(color)}"${opacity} stroke-width="${number(widthMM)}" stroke-linejoin="round"`;
+}
+
+function previewGuideAttributes(
+  color: RGBAColor,
+  kind: "label" | "page-slot",
+): string {
+  const alpha = colorAlpha(color);
+  const stroke = alpha <= 0
+    ? 'stroke="none"'
+    : `stroke="${colorHex(color)}"${alpha < 1 ? ` stroke-opacity="${number(alpha)}"` : ""}`;
+  return `data-preview-guide="${kind}" fill="none" ${stroke} stroke-width="${number(PREVIEW_GUIDE_STROKE_PX)}" stroke-linejoin="round" vector-effect="non-scaling-stroke" shape-rendering="geometricPrecision" pointer-events="none"`;
 }
 
 function rectGeometry(frame: RectMM): RectMM {
@@ -1483,7 +1497,7 @@ export function renderLabelSVG(
         document.sheet.shape,
         { x: 0, y: 0, width, height },
         document.sheet.cornerRadiusMM,
-        `${fillAttributes({ ...resolved.guideColor, alpha: 0 })} ${strokeAttributes(resolved.guideColor, 0.6)}`,
+        previewGuideAttributes(resolved.guideColor, "label"),
       )
     : "";
   const body = `${renderBackground(width, height, resolved.backgroundColor)}${fragment.body}${guide}`;
@@ -1528,7 +1542,8 @@ function renderPageSVGWithPreparedFonts(
     throw new RangeError("pageIndex must be a non-negative integer");
   }
   const totalPages = pageCount(document);
-  if (pageIndex >= totalPages) {
+  const allowsTrailingPreviewPage = options.allowEmptyPage === true && pageIndex === totalPages;
+  if (pageIndex >= totalPages && !allowsTrailingPreviewPage) {
     throw new RangeError(`pageIndex ${pageIndex} is outside 0..${Math.max(0, totalPages - 1)}`);
   }
 
@@ -1571,7 +1586,7 @@ function renderPageSVGWithPreparedFonts(
             document.sheet.shape,
             slot,
             document.sheet.cornerRadiusMM,
-            `${fillAttributes({ ...resolved.guideColor, alpha: 0 })} ${strokeAttributes(resolved.guideColor, 0.6)}`,
+            previewGuideAttributes(resolved.guideColor, "page-slot"),
           ),
         );
       }

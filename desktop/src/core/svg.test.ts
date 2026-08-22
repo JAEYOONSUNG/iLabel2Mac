@@ -351,6 +351,30 @@ describe("renderLabelSVG", () => {
     expect(svg).toMatch(/data-kind="code128"[\s\S]*<(?:path|rect)/);
     expect(svg).not.toBe(other);
   });
+
+  it("draws an identifiable non-scaling screen-space guide only for previews", () => {
+    const document = documentWith([makeElement("text")]);
+    const preview = renderLabelSVG(document, ACTIVE_CONTEXT, {
+      now: NOW,
+      showGuides: true,
+      guideColor: { red: 1, green: 0.5, blue: 0, alpha: 0.5 },
+    });
+    const guide = preview.match(
+      /<(?:rect|ellipse)\b[^>]*data-preview-guide="label"[^>]*\/>/,
+    )?.[0];
+
+    expect(guide).toBeTruthy();
+    expect(guide).toContain('fill="none"');
+    expect(guide).toContain('stroke="#ff8000"');
+    expect(guide).toContain('stroke-opacity="0.5"');
+    expect(guide).toContain('stroke-width="1.25"');
+    expect(guide).toContain('vector-effect="non-scaling-stroke"');
+    expect(guide).toContain('data-preview-guide="label"');
+
+    const output = renderLabelSVG(document, ACTIVE_CONTEXT, { now: NOW });
+    expect(output).not.toContain("data-preview-guide");
+    expect(output).not.toContain('vector-effect="non-scaling-stroke"');
+  });
 });
 
 describe("renderPageSVG", () => {
@@ -383,14 +407,41 @@ describe("renderPageSVG", () => {
     expect(svg).toContain(">Slot 1</tspan>");
     expect(svg).toContain(">Slot 2</tspan>");
     expect(svg).toContain('transform="translate(22 0)"');
+    const guides = [...svg.matchAll(
+      /<(?:rect|ellipse)\b[^>]*data-preview-guide="page-slot"[^>]*\/>/g,
+    )].map((match) => match[0]);
+    expect(guides).toHaveLength(2);
+    for (const guide of guides) {
+      expect(guide).toContain('fill="none"');
+      expect(guide).toContain('stroke-width="1.25"');
+      expect(guide).toContain('vector-effect="non-scaling-stroke"');
+    }
     const ids = [...svg.matchAll(/<clipPath id="([^"]+)"/g)].map((match) => match[1]);
     expect(new Set(ids).size).toBe(ids.length);
+
+    const output = renderPageSVG(document, 0, { now: NOW });
+    expect(output).not.toContain("data-preview-guide");
+    expect(output).not.toContain('vector-effect="non-scaling-stroke"');
   });
 
   it("rejects page indices outside the document", () => {
     const document = documentWith([makeElement("text")]);
     expect(() => renderPageSVG(document, -1)).toThrow(RangeError);
     expect(() => renderPageSVG(document, 1)).toThrow(RangeError);
+  });
+
+  it("allows exactly one blank trailing page for interactive capture staging", () => {
+    const document = documentWith([makeElement("text")]);
+    const staging = renderPageSVG(document, 1, {
+      now: NOW,
+      showGuides: true,
+      allowEmptyPage: true,
+    });
+
+    expect(staging).toContain('aria-label="SVG &lt;test&gt; &amp; output page 2"');
+    expect(staging).toContain('data-preview-guide="page-slot"');
+    expect(staging).not.toContain('data-slot-index="0"');
+    expect(() => renderPageSVG(document, 2, { allowEmptyPage: true })).toThrow(RangeError);
   });
 
   it("shares one embedded font definition across every slot", () => {
@@ -441,6 +492,8 @@ describe("print and data URL exports", () => {
     expect(all).toContain('data-page-index="1"');
     expect(all).toContain("requestAnimationFrame(()=>print())");
     expect(all).toContain("SVG &lt;test&gt; &amp; output");
+    expect(all).not.toContain("data-preview-guide");
+    expect(all).not.toContain('vector-effect="non-scaling-stroke"');
     expect(current.match(/class="ilabel-print-page"/g)).toHaveLength(1);
     expect(current).toContain('data-page-index="1"');
     expect(current).not.toContain('data-page-index="0"');

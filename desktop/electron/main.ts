@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeTheme,
   protocol,
   session,
   type IpcMainInvokeEvent,
@@ -95,6 +96,7 @@ const IPC = {
   print: "output:print",
   waitForPrintDrain: "output:wait-for-print-drain",
   osInfo: "system:os-info",
+  setTheme: "system:set-theme",
   wifiStatus: "wifi:status",
   wifiTest: "wifi:test",
   wifiSwitch: "wifi:switch",
@@ -1074,6 +1076,13 @@ function registerIPC(): void {
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
   }));
+  handle(IPC.setTheme, async (theme: unknown) => {
+    if (theme !== "light" && theme !== "dark" && theme !== "system") {
+      throw new MainProcessError("INVALID_THEME", "Theme must be light, dark, or system.");
+    }
+    nativeTheme.themeSource = theme;
+    return success(theme);
+  });
   handle(IPC.wifiStatus, async () => success(await wifiStatus()));
   handle(IPC.wifiTest, async (request: WifiTestRequest) => success(await testWifi(request)));
   handle(IPC.wifiSwitch, async (request: WifiRequest) => success(await switchWifi(request)));
@@ -1181,7 +1190,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 1080,
     minHeight: 700,
     show: false,
-    backgroundColor: "#f7f8fb",
+    backgroundColor: "#fcfcfd",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1206,6 +1215,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  nativeTheme.themeSource = "light";
   registerRendererProtocol();
   configureRendererPermissions();
   registerIPC();

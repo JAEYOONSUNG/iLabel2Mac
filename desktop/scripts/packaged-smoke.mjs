@@ -95,8 +95,27 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function approximately(value, expected, tolerance) {
+  return Number.isFinite(value) && Math.abs(value - expected) <= tolerance;
+}
+
 try {
   await command("Page.enable");
+  const rendererDeadline = Date.now() + 15_000;
+  while (Date.now() < rendererDeadline) {
+    const ready = await evaluate(`Boolean(
+      document.readyState === 'complete' &&
+      document.querySelector('#root .app-shell') &&
+      typeof window.iLabelDesktop?.getOSInfo === 'function'
+    )`);
+    if (ready) break;
+    await delay(100);
+  }
+  const rendererReady = await evaluate(`Boolean(
+    document.querySelector('#root .app-shell') &&
+    typeof window.iLabelDesktop?.getOSInfo === 'function'
+  )`);
+  assert(rendererReady, "The packaged renderer or preload bridge did not become ready.");
   await evaluate("document.fonts.ready");
   const initial = await evaluate(`(async () => ({
     root: Boolean(document.querySelector('#root .app-shell')),
@@ -105,13 +124,94 @@ try {
       document.querySelector('.format-summary strong')?.textContent.trim() === '680' &&
       document.querySelector('.format-summary')?.innerText.includes('14×20 · 12 × 12 mm') &&
       Boolean(document.querySelector('.object-list .empty-state')),
+    nativeTheme: document.documentElement.dataset.theme === 'light',
     api: typeof window.iLabelDesktop?.getOSInfo === 'function',
     os: (await window.iLabelDesktop.getOSInfo()).status
   }))()`);
   assert(initial.root, "The React root did not render.");
   assert(initial.catalog, "The official 1,006-format catalog did not load.");
   assert(initial.default680, "A new packaged app did not start as a blank official 680 document.");
+  assert(initial.nativeTheme, "A fresh packaged app did not start with the native light appearance.");
   assert(initial.api && initial.os === "success", "The preload API is unavailable.");
+
+  const parity = await evaluate(`(() => {
+    const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+    const toolbar = rect('.toolbar');
+    const workspace = document.querySelector('.editor-workspace');
+    const preview = rect('.preview-column');
+    const previewControls = rect('.preview-controls');
+    const app = document.querySelector('.app-shell');
+    const normalizedText = (value) => value.replace(/\\s+/g, ' ').trim();
+    const resetArea = [...document.querySelectorAll('.preview-legend button')]
+      .some((button) => normalizedText(button.textContent ?? '') === 'Reset Area');
+    const legend = document.querySelector('.preview-legend');
+    const legendText = normalizedText(legend?.textContent ?? '');
+    const horizontalOverflow = [document.documentElement, document.body, app]
+      .filter(Boolean)
+      .some((node) => node.scrollWidth > node.clientWidth + 1);
+    const appBounds = app?.getBoundingClientRect();
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      toolbarHeight: toolbar?.height ?? null,
+      rootFontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      workspaceRadius: workspace
+        ? Number.parseFloat(getComputedStyle(workspace).borderTopLeftRadius)
+        : null,
+      previewWidth: preview?.width ?? null,
+      previewControlsHeight: previewControls?.height ?? null,
+      columnLabels: document.querySelectorAll('.page-column-axis > span').length,
+      rowLabels: document.querySelectorAll('.page-row-axis > span').length,
+      resetArea,
+      legend: Boolean(
+        legend &&
+        legend.querySelector('.legend-dot') &&
+        /(?:Print now|Captured)/.test(legendText)
+      ),
+      lightTheme: document.documentElement.dataset.theme === 'light',
+      horizontalOverflow,
+      appInsideViewport: Boolean(
+        appBounds &&
+        appBounds.left >= -1 &&
+        appBounds.right <= innerWidth + 1
+      )
+    };
+  })()`);
+  const parityState = JSON.stringify(parity);
+  assert(
+    approximately(parity.toolbarHeight, 46, 1),
+    `Toolbar height is not native-sized (expected 46±1px): ${parityState}`,
+  );
+  assert(
+    approximately(parity.rootFontSize, 13, 0.1),
+    `Root font size is not 13px: ${parityState}`,
+  );
+  assert(
+    approximately(parity.workspaceRadius, 22, 0.5),
+    `Editor workspace radius is not 22px: ${parityState}`,
+  );
+  assert(
+    Number.isFinite(parity.previewWidth) && parity.previewWidth > 0 && parity.previewWidth <= 420.5,
+    `Preview width exceeds the native 420px cap: ${parityState}`,
+  );
+  assert(
+    Number.isFinite(parity.previewControlsHeight) &&
+      parity.previewControlsHeight > 0 &&
+      parity.previewControlsHeight <= 320.5,
+    `Preview controls exceed the native 320px cap: ${parityState}`,
+  );
+  assert(
+    parity.columnLabels === 14 && parity.rowLabels === 20,
+    `Default 14×20 page axes are incomplete: ${parityState}`,
+  );
+  assert(
+    parity.resetArea && parity.legend,
+    `Reset Area or the print-state legend is missing: ${parityState}`,
+  );
+  assert(parity.lightTheme, `The packaged default theme is not light: ${parityState}`);
+  assert(
+    !parity.horizontalOverflow && parity.appInsideViewport,
+    `The packaged app has horizontal root overflow: ${parityState}`,
+  );
 
   const localFont = await evaluate(`(async () => {
     if (typeof window.queryLocalFonts !== 'function') return { available: false };
@@ -179,23 +279,28 @@ try {
     selection.addRange(range);
   })()`);
   await evaluate(`document.execCommand('insertText', false, 'A{{serial}}B')`);
-  await delay(350);
-  const enteredState = await evaluate(`(() => {
-    const editors = [...document.querySelectorAll('.rich-text-editor')];
-    return {
-      editor: editors[0]?.innerText,
-      preview: document.querySelector('.label-board .svg-surface [data-element-type="text"] text')?.textContent,
-      editors: editors.map((editor) => {
-        const propsKey = Object.keys(editor).find((key) => key.startsWith('__reactProps'));
-        return {
-          label: editor.getAttribute('aria-label'),
-          text: editor.innerText,
-          model: propsKey ? editor[propsKey]?.element?.content : undefined,
-          active: editor === document.activeElement
-        };
-      })
-    };
-  })()`);
+  let enteredState;
+  const richTextDeadline = Date.now() + 3_000;
+  do {
+    enteredState = await evaluate(`(() => {
+      const editors = [...document.querySelectorAll('.rich-text-editor')];
+      return {
+        editor: editors[0]?.innerText,
+        preview: document.querySelector('.label-board .svg-surface [data-element-type="text"] text')?.textContent,
+        editors: editors.map((editor) => {
+          const propsKey = Object.keys(editor).find((key) => key.startsWith('__reactProps'));
+          return {
+            label: editor.getAttribute('aria-label'),
+            text: editor.innerText,
+            model: propsKey ? editor[propsKey]?.element?.content : undefined,
+            active: editor === document.activeElement
+          };
+        })
+      };
+    })()`);
+    if (enteredState.editor === "A{{serial}}B" && enteredState.preview === "A(1)B") break;
+    await delay(100);
+  } while (Date.now() < richTextDeadline);
   assert(
     enteredState.editor === "A{{serial}}B" && enteredState.preview === "A(1)B",
     `Rich text input did not settle: ${JSON.stringify(enteredState)}`,
@@ -374,22 +479,60 @@ try {
     slots[15].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, buttons: 0 }));
   })()`);
   await delay(250);
-  const selectedArea = await evaluate("document.querySelectorAll('.page-slot-hit.selected').length");
-  assert(selectedArea === 4, `Rectangular slot drag selected ${selectedArea} slots instead of 4.`);
+  const selectedArea = await evaluate("document.querySelectorAll('.page-slot-hit.active').length");
+  assert(selectedArea === 4, `Rectangular slot drag activated ${selectedArea} slots instead of 4.`);
 
-  await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Capture current setup').click()`);
+  await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Capture Current Setup').click()`);
   await delay(350);
   const queue = await evaluate(`({
     captures: document.querySelectorAll('.queue-row').length,
-    nextDisabled: [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Next').disabled
+    nextDisabled: [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Next').disabled,
+    captureDisabled: [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Capture Current Setup').disabled,
+    placementHint: document.querySelector('.capture-hint')?.textContent.trim()
   })`);
-  assert(queue.captures === 1 && !queue.nextDisabled, "Capture staging page was not created.");
+  assert(
+    queue.captures === 1 && !queue.nextDisabled && queue.captureDisabled && /empty label position/.test(queue.placementHint ?? ""),
+    `The first capture did not enter native-style placement staging: ${JSON.stringify(queue)}`,
+  );
+
+  for (let pageAdvance = 0; pageAdvance < 20; pageAdvance += 1) {
+    const pageLabel = await evaluate("document.querySelector('.toolbar-page')?.textContent.trim()");
+    if (/^New Page \d+$/.test(pageLabel ?? "")) break;
+    await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Next').click()`);
+    await delay(150);
+  }
+  await evaluate(`(() => {
+    const slots = [...document.querySelectorAll('.page-slot-hit')];
+    slots[0].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1 }));
+    slots[15].dispatchEvent(new PointerEvent('pointerover', { bubbles: true, buttons: 1 }));
+    slots[15].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, buttons: 0 }));
+  })()`);
+  await delay(350);
+  const staged = await evaluate(`({
+    pageLabel: document.querySelector('.toolbar-page')?.textContent.trim(),
+    captureDisabled: [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Capture Current Setup').disabled,
+    draftSlots: document.querySelectorAll('.page-slot-hit.draft').length,
+    conflicts: document.querySelectorAll('.page-slot-hit.conflict').length
+  })`);
+  assert(
+    /^New Page \d+$/.test(staged.pageLabel ?? "") && !staged.captureDisabled && staged.draftSlots === 4 && staged.conflicts === 0,
+    `The next capture was not staged on the blank page: ${JSON.stringify(staged)}`,
+  );
 
   if (screenshotPath) {
+    await evaluate(`(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      for (const editor of document.querySelectorAll('.rich-text-editor')) editor.scrollTop = 0;
+      const inspector = document.querySelector('.inspector');
+      if (inspector) inspector.scrollTop = 0;
+      const controls = document.querySelector('.preview-controls');
+      if (controls) controls.scrollTop = 0;
+    })()`);
+    await delay(100);
     const screenshot = await command("Page.captureScreenshot", { format: "png", fromSurface: true });
     await writeFile(screenshotPath, Buffer.from(screenshot.data, "base64"));
   }
-  process.stdout.write(`Packaged smoke passed: ${JSON.stringify({ localFonts: localFont.count, selectedArea, caretTokenContent, ...richText, ...queue })}\n`);
+  process.stdout.write(`Packaged smoke passed: ${JSON.stringify({ localFonts: localFont.count, selectedArea, caretTokenContent, ...richText, ...queue, ...staged })}\n`);
 } finally {
   socket.close();
   application.kill();

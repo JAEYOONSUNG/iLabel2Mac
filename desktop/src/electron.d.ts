@@ -156,6 +156,7 @@ export interface ILabelDesktopAPI {
   print(request: PrintableHTMLRequest): Promise<IPCResult<PrintJobData>>;
   waitForPrintDrain(request: PrintDrainRequest): Promise<IPCResult<PrintDrainData>>;
   getOSInfo(): Promise<IPCResult<OSInfo>>;
+  setTheme(theme: "light" | "dark" | "system"): Promise<IPCResult<"light" | "dark" | "system">>;
   wifi: {
     getStatus(): Promise<IPCResult<WifiStatus>>;
     test(request: WifiTestRequest): Promise<IPCResult<WifiTestData>>;

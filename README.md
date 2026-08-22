@@ -42,13 +42,14 @@ For development, use Node.js 22 and run `npm run dev` in `desktop/`. The workflo
 
 ![Adjust label quantities and capture multiple print runs](docs/assets/capture-queue-workflow.gif)
 
-The demo captures **8 labels** (`End 4 × Repeat 2`), then changes the setup and captures **3 more labels** (`End 3 × Repeat 1`).
+The light-theme demo uses the Windows/Linux edition and captures **8 labels** (`End 4 × Repeat 2`), then stages an empty position and captures **3 more labels** (`End 3 × Repeat 1`).
 
 1. Set the quantity with **Start**, **End**, **Step**, and **Repeat**. With CSV data, one label is generated per imported row.
 2. Click a slot in **Page Preview** to choose where the run starts.
-3. Choose **Capture current setup**. The artwork, data, quantity, page, and start position are locked together.
-4. Adjust the next run's quantity and capture again. iLabel2 automatically stages it on the next available sheet.
-5. Reorder or remove captured runs if needed, then choose **Print captures** to print the complete queue as one multi-page job.
+3. Choose **Capture Current Setup**. The artwork, data, quantity, page, and start position are locked together.
+4. Click another empty label position to stage the next capture. Use **Next** if you want to start on a blank sheet; the capture button stays disabled until a valid position is staged.
+5. Adjust the next run's quantity, then choose **Capture Current Setup** again.
+6. Reorder or remove captured runs if needed, then choose **Print Captures** to print the complete queue as one multi-page job.
 
 ## Features
 
@@ -62,6 +63,7 @@ The demo captures **8 labels** (`End 4 × Repeat 2`), then changes the setup and
 - Capture queue that locks artwork, Numbering/CSV setup, page, and start position, then prints every capture in one multi-page job
 - Full-circle text flow with chord-shaped lines and matching editor, preview, PDF, and print layout
 - Page preview with per-slot merge rendering and rectangular drag selection
+- macOS-matched three-pane layout, light/dark appearance, numbered page axes, and captured/next/overlap preview states
 - JSON project save/load
 - Exact-size PDF output and 720-DPI PNG output with physical-resolution metadata
 - Windows print spool monitoring and Linux CUPS monitoring, with optional printer Wi-Fi switching only when the current network cannot drain the job

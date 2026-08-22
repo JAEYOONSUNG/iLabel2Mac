@@ -20,8 +20,11 @@ import {
   DocumentCoreError,
   captureBatch,
   clearBatches,
+  clearPlacementSelection,
   currentSetupLabelCount,
+  draftConflictSlotIndices,
   draftPlacementPlan,
+  draftPreviewSlotIndices,
   firstPlacementConflict,
   moveBatch,
   normalizeDocument,
@@ -32,6 +35,7 @@ import {
   selectPlacementRect,
   selectPlacementStart,
   updatePlacementFillDirection,
+  visiblePreviewSlotIndices,
 } from "./core/document";
 import { parseCSV } from "./core/csv";
 import { normalizeDocumentImages, normalizeImportedImage } from "./core/image";
@@ -456,11 +460,13 @@ function Sidebar({
   return (
     <aside className="sidebar" aria-label="Project and label stock">
       <div className="panel-stack">
-        <Section title="Project">
+        <Section title="Project" className="project-section">
           <div className="field-stack">
             <label className="field-label">
-              <span>Title</span>
+              <span className="visually-hidden">Title</span>
               <input
+                aria-label="Title"
+                placeholder="Title"
                 value={document.title}
                 onChange={(event) => onDocumentField("title", event.currentTarget.value)}
               />
@@ -483,8 +489,10 @@ function Sidebar({
             )}
 
             <label className="field-label">
-              <span>Quick preset</span>
+              <span className="visually-hidden">Quick presets</span>
               <select
+                aria-label="Quick presets"
+                className="quick-preset-menu"
                 disabled={hasQueue}
                 value=""
                 onChange={(event) => {
@@ -492,7 +500,7 @@ function Sidebar({
                   if (preset) onApplyPreset(preset);
                 }}
               >
-                <option value="">Choose…</option>
+                <option value="">Quick Presets</option>
                 {SHEET_PRESETS.map((preset) => (
                   <option key={preset.id} value={preset.id}>{preset.name}</option>
                 ))}
@@ -501,7 +509,7 @@ function Sidebar({
           </div>
         </Section>
 
-        <Section title="Official Formats">
+        <Section title="Official Formats" className="formats-section">
           <div className="compact-stack">
             <input
               aria-label="Search official formats"
@@ -509,16 +517,19 @@ function Sidebar({
               value={search}
               onChange={(event) => setSearch(event.currentTarget.value)}
             />
-            <select
-              aria-label="Product family"
-              value={family}
-              onChange={(event) => setFamily(event.currentTarget.value as ProductFamily | "all")}
-            >
-              <option value="all">All families</option>
-              {(Object.keys(FAMILY_LABELS) as ProductFamily[]).map((key) => (
-                <option key={key} value={key}>{FAMILY_LABELS[key]}</option>
-              ))}
-            </select>
+            <label className="filter-row">
+              <span>Family</span>
+              <select
+                aria-label="Product family"
+                value={family}
+                onChange={(event) => setFamily(event.currentTarget.value as ProductFamily | "all")}
+              >
+                <option value="all">All Families</option>
+                {(Object.keys(FAMILY_LABELS) as ProductFamily[]).map((key) => (
+                  <option key={key} value={key}>{FAMILY_LABELS[key]}</option>
+                ))}
+              </select>
+            </label>
             <p className="microcopy">{filteredFormats.length.toLocaleString()} matches / {catalog.length.toLocaleString()} official formats</p>
             <div className="format-list" role="listbox" aria-label="Official formats">
               {filteredFormats.slice(0, 180).map((format) => (
@@ -545,35 +556,59 @@ function Sidebar({
           </div>
         </Section>
 
-        <Section title="Sheet">
+        <Section title="Sheet" className="sheet-section">
           <fieldset disabled={hasQueue} style={{ border: 0, margin: 0, padding: 0 }}>
-            <div className="field-grid">
-              <NumberField label="Page W" suffix="mm" value={document.sheet.pageWidthMM} min={10} onChange={(value) => onSheetField("pageWidthMM", value)} />
-              <NumberField label="Page H" suffix="mm" value={document.sheet.pageHeightMM} min={10} onChange={(value) => onSheetField("pageHeightMM", value)} />
-              <NumberField label="Columns" value={document.sheet.columns} min={1} max={50} step={1} onChange={(value) => onSheetField("columns", Math.round(value))} />
-              <NumberField label="Rows" value={document.sheet.rows} min={1} max={100} step={1} onChange={(value) => onSheetField("rows", Math.round(value))} />
-              <NumberField label="Label W" suffix="mm" value={document.sheet.labelWidthMM} min={1} onChange={(value) => onSheetField("labelWidthMM", value)} />
-              <NumberField label="Label H" suffix="mm" value={document.sheet.labelHeightMM} min={1} onChange={(value) => onSheetField("labelHeightMM", value)} />
-              <NumberField label="Gap W" suffix="mm" value={document.sheet.horizontalGapMM} min={0} onChange={(value) => onSheetField("horizontalGapMM", value)} />
-              <NumberField label="Gap H" suffix="mm" value={document.sheet.verticalGapMM} min={0} onChange={(value) => onSheetField("verticalGapMM", value)} />
-              <NumberField label="Margin X" suffix="mm" value={document.sheet.marginLeftMM} min={0} onChange={(value) => onSheetField("marginLeftMM", value)} />
-              <NumberField label="Margin Y" suffix="mm" value={document.sheet.marginTopMM} min={0} onChange={(value) => onSheetField("marginTopMM", value)} />
-              <NumberField label="Corner" suffix="mm" value={document.sheet.cornerRadiusMM} min={0} onChange={(value) => onSheetField("cornerRadiusMM", value)} />
-              <label className="field-label">
-                <span>Shape</span>
-                <select value={document.sheet.shape} onChange={(event) => onSheetField("shape", event.currentTarget.value as SheetTemplate["shape"])}>
-                  <option value="roundedRectangle">Rounded</option>
-                  <option value="rectangle">Rectangle</option>
-                  <option value="capsule">Capsule</option>
-                  <option value="circle">Circle</option>
-                </select>
-              </label>
+            <div className="sheet-settings">
+              <div className="dimension-group">
+                <span className="dimension-title">Page</span>
+                <div className="field-grid">
+                  <NumberField label="W" suffix="mm" value={document.sheet.pageWidthMM} min={10} onChange={(value) => onSheetField("pageWidthMM", value)} />
+                  <NumberField label="H" suffix="mm" value={document.sheet.pageHeightMM} min={10} onChange={(value) => onSheetField("pageHeightMM", value)} />
+                </div>
+              </div>
+              <div className="sheet-count-grid">
+                <NumberField label="Columns" value={document.sheet.columns} min={1} max={50} step={1} onChange={(value) => onSheetField("columns", Math.round(value))} />
+                <NumberField label="Rows" value={document.sheet.rows} min={1} max={100} step={1} onChange={(value) => onSheetField("rows", Math.round(value))} />
+              </div>
+              <div className="dimension-group">
+                <span className="dimension-title">Label</span>
+                <div className="field-grid">
+                  <NumberField label="W" suffix="mm" value={document.sheet.labelWidthMM} min={1} onChange={(value) => onSheetField("labelWidthMM", value)} />
+                  <NumberField label="H" suffix="mm" value={document.sheet.labelHeightMM} min={1} onChange={(value) => onSheetField("labelHeightMM", value)} />
+                </div>
+              </div>
+              <div className="dimension-group">
+                <span className="dimension-title">Gap</span>
+                <div className="field-grid">
+                  <NumberField label="W" suffix="mm" value={document.sheet.horizontalGapMM} min={0} onChange={(value) => onSheetField("horizontalGapMM", value)} />
+                  <NumberField label="H" suffix="mm" value={document.sheet.verticalGapMM} min={0} onChange={(value) => onSheetField("verticalGapMM", value)} />
+                </div>
+              </div>
+              <div className="dimension-group">
+                <span className="dimension-title">Margins</span>
+                <div className="field-grid">
+                  <NumberField label="X" suffix="mm" value={document.sheet.marginLeftMM} min={0} onChange={(value) => onSheetField("marginLeftMM", value)} />
+                  <NumberField label="Y" suffix="mm" value={document.sheet.marginTopMM} min={0} onChange={(value) => onSheetField("marginTopMM", value)} />
+                </div>
+              </div>
+              <div className="sheet-final-grid">
+                <NumberField label="Corner" suffix="mm" value={document.sheet.cornerRadiusMM} min={0} onChange={(value) => onSheetField("cornerRadiusMM", value)} />
+                <label className="field-label inline">
+                  <span>Shape</span>
+                  <select value={document.sheet.shape} onChange={(event) => onSheetField("shape", event.currentTarget.value as SheetTemplate["shape"])}>
+                    <option value="roundedRectangle">Rounded</option>
+                    <option value="rectangle">Rectangle</option>
+                    <option value="capsule">Capsule</option>
+                    <option value="circle">Circle</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </fieldset>
           {hasQueue && <p className="microcopy">Reset the capture queue before changing sheet geometry.</p>}
         </Section>
 
-        <Section title="Data">
+        <Section title="Data" className="data-section">
           <div className="compact-stack">
             <div className="metric-line">
               <span>Imported rows</span>
@@ -588,7 +623,7 @@ function Sidebar({
           </div>
         </Section>
 
-        <Section title="Objects">
+        <Section title="Objects" className="objects-section">
           <div className="object-list" role="listbox" aria-label="Label objects">
             {document.elements.map((element) => (
               <button
@@ -618,8 +653,9 @@ function Sidebar({
 
 interface NumberingQueueProps {
   document: LabelDocument;
-  pendingPage: number;
   captureIssue?: string;
+  captureHint?: string;
+  canCapture: boolean;
   onSerialField: <K extends keyof LabelDocument["serial"]>(key: K, value: LabelDocument["serial"][K]) => void;
   onFillDirection: (value: LabelDocument["placement"]["fillDirection"]) => void;
   onCapture: () => void;
@@ -631,8 +667,9 @@ interface NumberingQueueProps {
 
 function NumberingQueue({
   document,
-  pendingPage,
   captureIssue,
+  captureHint,
+  canCapture,
   onSerialField,
   onFillDirection,
   onCapture,
@@ -651,7 +688,7 @@ function NumberingQueue({
 
   return (
     <>
-      <Section title="Numbering">
+      <Section title="Numbering" className="numbering-section">
         <div className="field-grid">
           <label className="field-label">
             <span>Mode</span>
@@ -693,19 +730,16 @@ function NumberingQueue({
         </p>
       </Section>
 
-      <Section title="Capture Queue">
+      <Section title="Capture Queue" className="queue-section">
         <div className="compact-stack">
+          <p className="microcopy">Each capture locks its label, Numbering/CSV setup, page, and start position. Changing the sheet start area only affects the next capture.</p>
           <div className="metric-line">
-            <span>Next capture</span>
-            <strong>{setupCount.toLocaleString()} label{setupCount === 1 ? "" : "s"}</strong>
+            <span>Current setup</span>
+            <strong>{setupCount.toLocaleString()} label(s)</strong>
           </div>
-          <div className="metric-line">
-            <span>Start sheet</span>
-            <strong>Page {pendingPage + 1}</strong>
-          </div>
-          <button className="primary" onClick={onCapture}>Capture current setup</button>
-          <p className="microcopy">Click a slot in the page preview to choose the start position, then capture. Artwork and merge data are locked together.</p>
+          <button className="primary" disabled={!canCapture} onClick={onCapture}>Capture Current Setup</button>
           {captureIssue && <div className="toast-error">{captureIssue}</div>}
+          {!captureIssue && captureHint && <div className="capture-hint">{captureHint}</div>}
 
           {batches.length > 0 ? (
             <>
@@ -730,12 +764,12 @@ function NumberingQueue({
                 ))}
               </div>
               <div className="button-row">
-                <button onClick={onResetQueue}>Reset queue</button>
-                <button className="primary" onClick={onPrintAll}>Print captures</button>
+                <button onClick={onResetQueue}>Reset Queue</button>
+                <button className="primary" onClick={onPrintAll}>Print Captures</button>
               </div>
             </>
           ) : (
-            <div className="empty-state">Nothing captured yet. Printing now uses the live setup.</div>
+            <div className="empty-state">No captured setups yet.</div>
           )}
         </div>
       </Section>
@@ -747,8 +781,9 @@ interface InspectorProps {
   document: LabelDocument;
   selected?: LabelElement;
   canvasMode: CanvasMode;
-  pendingPage: number;
   captureIssue?: string;
+  captureHint?: string;
+  canCapture: boolean;
   fontFamilies: readonly string[];
   availableFontNames: ReadonlySet<string>;
   quickTextPresets: readonly string[];
@@ -779,8 +814,9 @@ function Inspector({
   document,
   selected,
   canvasMode,
-  pendingPage,
   captureIssue,
+  captureHint,
+  canCapture,
   fontFamilies,
   availableFontNames,
   quickTextPresets,
@@ -807,6 +843,20 @@ function Inspector({
   onPrintAll,
 }: InspectorProps) {
   const tokens = [...BUILTIN_TOKENS, ...(document.dataTable?.headers.map((header) => `{{${header}}}`) ?? [])];
+  const [notesExpanded, setNotesExpanded] = useState(
+    () => localStorage.getItem("ilabel2.inspector.notesExpanded") === "true",
+  );
+  const [wifiExpanded, setWiFiExpanded] = useState(
+    () => localStorage.getItem("ilabel2.inspector.wifiExpanded") === "true",
+  );
+
+  useEffect(() => {
+    localStorage.setItem("ilabel2.inspector.notesExpanded", String(notesExpanded));
+  }, [notesExpanded]);
+
+  useEffect(() => {
+    localStorage.setItem("ilabel2.inspector.wifiExpanded", String(wifiExpanded));
+  }, [wifiExpanded]);
 
   return (
     <aside className="inspector" aria-label="Selected object inspector">
@@ -814,8 +864,9 @@ function Inspector({
         {canvasMode === "page" && (
           <NumberingQueue
             document={document}
-            pendingPage={pendingPage}
             captureIssue={captureIssue}
+            captureHint={captureHint}
+            canCapture={canCapture}
             onSerialField={onSerialField}
             onFillDirection={onFillDirection}
             onCapture={onCapture}
@@ -828,7 +879,7 @@ function Inspector({
 
         {selected ? (
           <>
-            <Section title="Selected Object">
+            <Section title="Selection" className="selected-object-section">
               <div className="field-stack">
                 <label className="field-label">
                   <span>Name</span>
@@ -847,6 +898,8 @@ function Inspector({
                         <RichTextEditor
                           element={selected}
                           ariaLabel="Text content"
+                          fontScale={12 / Math.max(0.5, selected.fontSize)}
+                          style={{ textAlign: "left" }}
                           onChange={(content, richTextRTF) => onRichTextChange(
                             selected.id,
                             content,
@@ -903,7 +956,7 @@ function Inspector({
               </div>
             </Section>
 
-            <Section title="Frame">
+            <Section title="Frame" className="frame-section">
               <div className="field-grid">
                 <NumberField label="X" suffix="mm" value={selected.frame.x} step={0.1} onChange={(value) => onUpdateSelected((element) => { element.frame.x = value; }, "frame-x")} />
                 <NumberField label="Y" suffix="mm" value={selected.frame.y} step={0.1} onChange={(value) => onUpdateSelected((element) => { element.frame.y = value; }, "frame-y")} />
@@ -915,7 +968,7 @@ function Inspector({
               {selected.type === "text" && <button style={{ marginTop: 8 }} onClick={onFitText}>{document.sheet.shape === "circle" ? "Fit text to circle" : "Center in label"}</button>}
             </Section>
 
-            <Section title="Appearance">
+            <Section title="Appearance" className="appearance-section">
               <div className="field-stack">
                 {selected.type === "text" && (
                   <>
@@ -1032,7 +1085,7 @@ function Inspector({
                   </label>
                 )}
 
-                <ColorField label="Foreground" value={selected.foreground} onChange={(value) => selected.type === "text"
+                <ColorField label={selected.type === "text" ? "Text color" : "Foreground"} value={selected.foreground} onChange={(value) => selected.type === "text"
                   ? onTextStyleAction({ kind: "foreground", value })
                   : onUpdateSelected((element) => { element.foreground = value; }, "foreground")} />
                 <ColorField label="Background" value={selected.background} onChange={(value) => onUpdateSelected((element) => { element.background = value; }, "background")} />
@@ -1045,16 +1098,26 @@ function Inspector({
             </Section>
           </>
         ) : (
-          <div className="empty-state">Select an object on the label or add one from the toolbar.</div>
+          <Section title="Selection" className="selection-empty-section">
+            <div className="selection-empty">Select an object from the canvas or object list to edit it.</div>
+          </Section>
         )}
 
-        <details className="section-card">
+        <details
+          className="section-card"
+          open={notesExpanded}
+          onToggle={(event) => setNotesExpanded(event.currentTarget.open)}
+        >
           <summary>Project Notes</summary>
           <textarea rows={5} value={document.notes} onChange={(event) => onDocumentField("notes", event.currentTarget.value)} />
         </details>
 
-        <details className="section-card">
-          <summary>Printer Wi-Fi</summary>
+        <details
+          className="section-card"
+          open={wifiExpanded}
+          onToggle={(event) => setWiFiExpanded(event.currentTarget.open)}
+        >
+          <summary>Wi-Fi Print</summary>
           <div className="field-stack">
             <label className="field-label checkbox-row">
               <input type="checkbox" checked={document.printAutomation.enabled} onChange={(event) => onPrintSettings("enabled", event.currentTarget.checked)} />
@@ -1103,7 +1166,7 @@ function LabelEditor({
     stageSize.height,
     document.sheet.labelWidthMM,
     document.sheet.labelHeightMM,
-    42,
+    22,
   );
   const liveDocument = useMemo(() => {
     const next = clone(document);
@@ -1286,7 +1349,7 @@ function LabelEditor({
 interface PageBoardProps {
   document: LabelDocument;
   pageIndex: number;
-  selectedSlots?: Set<number>;
+  conflictSlots?: Set<number>;
   interactive?: boolean;
   compact?: boolean;
   draftBatchID?: string;
@@ -1297,7 +1360,7 @@ interface PageBoardProps {
 function PageBoard({
   document,
   pageIndex,
-  selectedSlots = new Set<number>(),
+  conflictSlots = new Set<number>(),
   interactive = false,
   compact = false,
   draftBatchID,
@@ -1305,10 +1368,13 @@ function PageBoard({
   onSelectRange,
 }: PageBoardProps) {
   const { ref, size } = useElementSize<HTMLDivElement>();
-  const inset = compact ? 6 : 28;
+  const inset = compact ? 20 : 28;
   const board = fittedBoardMetrics(size.width, size.height, document.sheet.pageWidthMM, document.sheet.pageHeightMM, inset);
   const svg = useMemo(
-    () => renderPageSVG(document, pageIndex, { showGuides: true }),
+    () => renderPageSVG(document, pageIndex, {
+      showGuides: true,
+      allowEmptyPage: pageIndex === pageCount(document),
+    }),
     [document, pageIndex],
   );
   const slots = Array.from({ length: Math.max(1, document.sheet.columns * document.sheet.rows) }, (_, index) => index);
@@ -1327,8 +1393,24 @@ function PageBoard({
 
   return (
     <div className={compact ? "mini-page-wrap" : "page-editor-stage"} ref={ref}>
-      <div className="page-board" style={{ width: board.width, height: board.height }}>
+      <div className="page-board with-indexes" style={{ width: board.width, height: board.height }}>
         <div className="page-surface" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="page-column-axis" aria-hidden="true">
+          {Array.from({ length: document.sheet.columns }, (_, column) => {
+            const center = document.sheet.marginLeftMM
+              + column * (document.sheet.labelWidthMM + document.sheet.horizontalGapMM)
+              + document.sheet.labelWidthMM / 2;
+            return <span key={column} style={{ left: `${(center / document.sheet.pageWidthMM) * 100}%` }}>{column + 1}</span>;
+          })}
+        </div>
+        <div className="page-row-axis" aria-hidden="true">
+          {Array.from({ length: document.sheet.rows }, (_, row) => {
+            const center = document.sheet.marginTopMM
+              + row * (document.sheet.labelHeightMM + document.sheet.verticalGapMM)
+              + document.sheet.labelHeightMM / 2;
+            return <span key={row} style={{ top: `${(center / document.sheet.pageHeightMM) * 100}%` }}>{row + 1}</span>;
+          })}
+        </div>
         {interactive && slots.map((slotIndex) => {
           const row = Math.floor(slotIndex / document.sheet.columns);
           const column = slotIndex % document.sheet.columns;
@@ -1340,7 +1422,7 @@ function PageBoard({
               key={slotIndex}
               data-slot-index={slotIndex}
               aria-label={`Start at row ${row + 1}, column ${column + 1}`}
-              className={`page-slot-hit ${selectedSlots.has(slotIndex) ? "selected" : ""} ${payload.batchID === draftBatchID ? "draft" : payload.batchID ? "captured" : ""}`}
+              className={`page-slot-hit ${conflictSlots.has(slotIndex) ? "conflict" : payload.batchID === draftBatchID ? "draft" : payload.batchID ? "captured" : payload.context.isActive ? "active" : ""}`}
               style={{
                 left: `${(left / document.sheet.pageWidthMM) * 100}%`,
                 top: `${(top / document.sheet.pageHeightMM) * 100}%`,
@@ -1377,6 +1459,7 @@ interface EditorProps extends NumberingQueueProps {
   previewDocument: LabelDocument;
   pageIndex: number;
   canvasMode: CanvasMode;
+  pendingPage?: number;
   selectedID?: string;
   onSelect: (id: string) => void;
   onFrameChange: LabelEditorProps["onFrameChange"];
@@ -1384,6 +1467,7 @@ interface EditorProps extends NumberingQueueProps {
   onActivateRichEditor: LabelEditorProps["onActivateRichEditor"];
   onSelectSlot: (slotIndex: number) => void;
   onSelectSlotRange: (startSlot: number, endSlot: number) => void;
+  onResetArea: () => void;
 }
 
 function Editor({
@@ -1394,12 +1478,15 @@ function Editor({
   selectedID,
   pendingPage,
   captureIssue,
+  captureHint,
+  canCapture,
   onSelect,
   onFrameChange,
   onRichTextChange,
   onActivateRichEditor,
   onSelectSlot,
   onSelectSlotRange,
+  onResetArea,
   onSerialField,
   onFillDirection,
   onCapture,
@@ -1410,9 +1497,17 @@ function Editor({
 }: EditorProps) {
   const selectedText = document.elements.find((element) => element.id === selectedID && element.type === "text")
     ?? document.elements.find((element) => element.type === "text");
-  const selection = new Set(orderedSlotIndices(document));
-  const activeOnPage = Array.from({ length: Math.max(1, previewDocument.sheet.columns * previewDocument.sheet.rows) })
-    .filter((_, slot) => renderPayload(previewDocument, slot, pageIndex).context.isActive).length;
+  const queued = (document.printQueue?.length ?? 0) > 0;
+  const draftPlan = queued && pendingPage !== undefined
+    ? draftPlacementPlan(document, pendingPage)
+    : undefined;
+  const draftSlots = draftPlan
+    ? draftPreviewSlotIndices(document, pageIndex, draftPlan)
+    : [];
+  const conflicts = new Set(
+    draftPlan ? draftConflictSlotIndices(document, pageIndex, draftPlan) : [],
+  );
+  const capturedOnPage = visiblePreviewSlotIndices(document, pageIndex).length;
 
   return (
     <main className="editor-pane">
@@ -1420,7 +1515,7 @@ function Editor({
         <div>
           <div className="editor-title-line">
             <h1>{canvasMode === "label" ? "Label Editor" : "Page Preview"}</h1>
-            <span>{canvasMode === "label" ? "Drag objects; double-click text to type." : "Full-sheet output preview."}</span>
+            <span>{canvasMode === "label" ? "Click the label and type." : "Full-sheet output preview."}</span>
           </div>
           {canvasMode === "label" && (
             <p className="editor-spec">
@@ -1449,21 +1544,32 @@ function Editor({
               <div className="preview-pane">
                 <div>
                   <div className="preview-heading"><strong>Print Preview</strong><span>Page {pageIndex + 1}</span></div>
-                  <p className="microcopy">Click a sheet slot to set where the next run starts.</p>
+                  <p className="microcopy">
+                    {queued
+                      ? "Blue labels are captured for print. Orange labels preview the next uncaptured setup."
+                      : "This is the full-sheet layout that will be exported or printed."}
+                  </p>
                 </div>
-                <PageBoard document={previewDocument} pageIndex={pageIndex} selectedSlots={selection} interactive compact draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
+                <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive compact draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
                 <div className="preview-legend">
-                  <span className="legend-dot" />
-                  <span>{(document.printQueue?.length ?? 0) > 0 ? "Captured" : "Print now"}</span>
-                  <span>· {activeOnPage} active · {pageCount(document)} page(s)</span>
+                  <button onClick={onResetArea}>Reset Area</button>
+                  <span className="legend-key"><span className="legend-dot" />{queued ? "Captured" : "Print now"}</span>
+                  {queued && <span className="legend-key next"><span className="legend-dot next" />Next</span>}
+                  {conflicts.size > 0 && <span className="legend-key conflict"><span className="legend-dot conflict" />Overlap</span>}
+                  <span className="legend-summary">
+                    {queued
+                      ? `captured ${capturedOnPage} · next ${draftSlots.length} · conflicts ${conflicts.size}`
+                      : `print ${capturedOnPage} · pages ${pageCount(document)}`}
+                  </span>
                 </div>
               </div>
               <div className="preview-controls">
                 <div className="panel-stack">
                   <NumberingQueue
                     document={document}
-                    pendingPage={pendingPage}
                     captureIssue={captureIssue}
+                    captureHint={captureHint}
+                    canCapture={canCapture}
                     onSerialField={onSerialField}
                     onFillDirection={onFillDirection}
                     onCapture={onCapture}
@@ -1477,7 +1583,7 @@ function Editor({
             </div>
           </>
         ) : (
-          <PageBoard document={previewDocument} pageIndex={pageIndex} selectedSlots={selection} interactive draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
+          <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
         )}
       </div>
     </main>
@@ -1492,7 +1598,7 @@ function unwrapIPC<T>(result: IPCResult<T>): T | undefined {
 
 interface HistorySnapshot {
   document: LabelDocument;
-  pendingPage: number;
+  pendingPage?: number;
 }
 
 interface RegisteredEmbeddedFont {
@@ -1509,7 +1615,9 @@ function App() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("label");
   const [theme, setTheme] = useState<AppAppearanceMode>(() => {
     const saved = localStorage.getItem("ilabel2.theme");
-    return saved === "light" || saved === "dark" ? saved : "system";
+    return saved === "light" || saved === "dark" || saved === "system"
+      ? saved
+      : "light";
   });
   const [quickTextPresets, setQuickTextPresets] = useState<string[]>(() => {
     try {
@@ -1524,8 +1632,8 @@ function App() {
   });
   const [newQuickTextPreset, setNewQuickTextPreset] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
-  const [pendingPage, setPendingPage] = useState(0);
-  const pendingPageRef = useRef(0);
+  const [pendingPage, setPendingPage] = useState<number | undefined>(0);
+  const pendingPageRef = useRef<number | undefined>(0);
   const [status, setStatus] = useState("Ready");
   const [captureIssue, setCaptureIssue] = useState<string>();
   const [busy, setBusy] = useState<string>();
@@ -1549,8 +1657,8 @@ function App() {
     activeRichEditor.current = null;
   }, [selectedID]);
 
-  const updatePendingPage = useCallback((value: number) => {
-    const normalized = Math.max(0, Math.trunc(value));
+  const updatePendingPage = useCallback((value?: number) => {
+    const normalized = value === undefined ? undefined : Math.max(0, Math.trunc(value));
     pendingPageRef.current = normalized;
     setPendingPage(normalized);
   }, []);
@@ -1698,6 +1806,7 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem("ilabel2.theme", theme);
+    void window.iLabelDesktop.setTheme(theme);
     const root = globalThis.document.documentElement;
     if (theme !== "system") {
       root.dataset.theme = theme;
@@ -1832,7 +1941,7 @@ function App() {
       setProjectPath(result.path);
       setSelectedID(loaded.elements[0]?.id);
       setCurrentPage(0);
-      updatePendingPage((loaded.printQueue?.length ?? 0) > 0 ? pageCount(loaded) : 0);
+      updatePendingPage((loaded.printQueue?.length ?? 0) > 0 ? undefined : 0);
       setCaptureIssue(undefined);
       resetHistory();
       setStatus(`Opened ${result.name}`);
@@ -1948,8 +2057,13 @@ function App() {
   }, [mutateDocument]);
 
   const selected = document.elements.find((element) => element.id === selectedID);
+  const hasQueuedCaptures = (document.printQueue?.length ?? 0) > 0;
+  const canCapture = document.elements.length > 0 && (!hasQueuedCaptures || pendingPage !== undefined);
+  const captureHint = hasQueuedCaptures && pendingPage === undefined
+    ? "Click an empty label position to stage the next capture."
+    : undefined;
   const previewDocument = useMemo(() => {
-    if ((document.printQueue?.length ?? 0) === 0 || document.elements.length === 0) return document;
+    if ((document.printQueue?.length ?? 0) === 0 || document.elements.length === 0 || pendingPage === undefined) return document;
     try {
       return captureBatch(document, pendingPage, {
         id: DRAFT_BATCH_ID,
@@ -2197,18 +2311,33 @@ function App() {
     }
   }, [currentPage, replaceDocument, updatePendingPage]);
 
+  const resetPlacementArea = useCallback(() => {
+    replaceDocument(
+      clearPlacementSelection(documentRef.current),
+      "Reset print area",
+      true,
+    );
+    updatePendingPage(currentPage);
+    setCaptureIssue(undefined);
+  }, [currentPage, replaceDocument, updatePendingPage]);
+
   const captureCurrent = useCallback(() => {
     try {
-      const next = captureBatch(documentRef.current, pendingPage);
-      replaceDocument(next, `Captured ${currentSetupLabelCount(documentRef.current)} label(s)`, true);
-      updatePendingPage(pageCount(next));
+      const current = documentRef.current;
+      if ((current.printQueue?.length ?? 0) > 0 && pendingPage === undefined) {
+        throw new Error("Choose an empty start position for the next capture.");
+      }
+      const quantity = currentSetupLabelCount(current);
+      const next = captureBatch(current, pendingPage ?? currentPage);
+      replaceDocument(next, `Captured ${quantity} label(s). Choose another empty position for the next capture.`, true);
+      updatePendingPage(undefined);
       setCaptureIssue(undefined);
     } catch (error) {
       const message = error instanceof DocumentCoreError || error instanceof Error ? error.message : String(error);
       setCaptureIssue(message);
       setStatus(message);
     }
-  }, [pendingPage, replaceDocument, updatePendingPage]);
+  }, [currentPage, pendingPage, replaceDocument, updatePendingPage]);
 
   const removeCapturedBatch = useCallback((id: string) => {
     const next = removeBatch(documentRef.current, id);
@@ -2378,7 +2507,10 @@ function App() {
   }, [currentPage, printSettingsRequest]);
 
   const totalPages = pageCount(document);
-  const navigationPages = Math.max(totalPages, pageCount(previewDocument));
+  const navigationPages = Math.max(
+    totalPages + (hasQueuedCaptures ? 1 : 0),
+    pageCount(previewDocument),
+  );
   const safeCurrentPage = Math.min(currentPage, Math.max(0, navigationPages - 1));
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
@@ -2451,7 +2583,7 @@ function App() {
         <div className="toolbar-group">
           <button onClick={() => void importCSV()}>CSV</button>
           <button onClick={() => void exportPDF(false)}>PDF</button>
-          <button disabled={totalPages <= 1} onClick={() => void exportPDF(true)}>PDF · All</button>
+          <button disabled={totalPages <= 1} onClick={() => void exportPDF(true)}>PDF·All</button>
           <button onClick={() => void exportPNG()}>PNG</button>
           <button onClick={() => void printDocument((document.printQueue?.length ?? 0) > 0)}>{(document.printQueue?.length ?? 0) > 0 ? "Print Captures" : "Print"}</button>
         </div>
@@ -2464,11 +2596,13 @@ function App() {
           <button onClick={() => void addElement("code128")}>Barcode</button>
         </div>
         <span className="toolbar-divider" />
-        <div className="toolbar-group segmented" aria-label="Canvas mode">
+        <span className="toolbar-label">Canvas</span>
+        <div className="toolbar-group segmented canvas-mode-control" aria-label="Canvas mode">
           <button className={canvasMode === "label" ? "active" : ""} onClick={() => setCanvasMode("label")}>Label</button>
           <button className={canvasMode === "page" ? "active" : ""} onClick={() => setCanvasMode("page")}>Page</button>
         </div>
         <span className="toolbar-divider" />
+        <span className="toolbar-label">Theme</span>
         <select className="toolbar-theme" aria-label="Theme" value={theme} onChange={(event) => setTheme(event.currentTarget.value as AppAppearanceMode)}>
           <option value="system">System</option>
           <option value="light">Light</option>
@@ -2507,6 +2641,8 @@ function App() {
           selectedID={selectedID}
           pendingPage={pendingPage}
           captureIssue={captureIssue}
+          captureHint={captureHint}
+          canCapture={canCapture}
           onSelect={setSelectedID}
           onFrameChange={(id, frame) => {
             mutateDocument((draft) => {
@@ -2518,6 +2654,7 @@ function App() {
           onActivateRichEditor={(editor) => { activeRichEditor.current = editor; }}
           onSelectSlot={selectSlot}
           onSelectSlotRange={selectSlotRange}
+          onResetArea={resetPlacementArea}
           onSerialField={serialField}
           onFillDirection={changeFillDirection}
           onCapture={captureCurrent}
@@ -2530,8 +2667,9 @@ function App() {
           document={document}
           selected={selected}
           canvasMode={canvasMode}
-          pendingPage={pendingPage}
           captureIssue={captureIssue}
+          captureHint={captureHint}
+          canCapture={canCapture}
           fontFamilies={fontFamilies}
           availableFontNames={availableFontNames}
           quickTextPresets={quickTextPresets}
