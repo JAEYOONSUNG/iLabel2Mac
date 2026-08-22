@@ -53,7 +53,7 @@ The demo captures **8 labels** (`End 4 × Repeat 2`), then changes the setup and
 ## Features
 
 - Native SwiftUI app for macOS and a feature-equivalent Electron app for Windows/Linux
-- 1,006 official `label.kr` formats, sheet presets, and editable custom sheet/roll geometry
+- 1,006 official `label.kr` formats, with every new project starting from official format `680`, plus editable custom sheet/roll geometry
 - Text, shape, image, QR, and Code128 elements
 - Selection-level rich text: font, size, bold, italic, underline, and RGBA color
 - macOS RTF compatibility and project-embedded TTF, OTF, WOFF, WOFF2, TTC, and OTC fonts

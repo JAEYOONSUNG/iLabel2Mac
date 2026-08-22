@@ -315,7 +315,7 @@ function normalizeBatch(value: unknown, index: number): PrintBatch {
 /** Parse and sanitize a Swift project JSON value into the shared model. */
 export function normalizeDocument(value: unknown): LabelDocument {
   const fallback = createStarterDocument();
-  if (!isRecord(value)) return fallback;
+  if (!isRecord(value) || !isRecord(value.sheet)) return fallback;
 
   const document: LabelDocument = {
     title: stringValue(value.title, fallback.title),

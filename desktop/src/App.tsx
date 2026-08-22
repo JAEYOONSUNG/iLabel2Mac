@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  DEFAULT_OFFICIAL_FORMAT_CODE,
   DEFAULT_PRINT_AUTOMATION,
   SHEET_PRESETS,
   createStarterDocument,
@@ -192,7 +193,9 @@ function createInitialDocument(): LabelDocument {
   } catch {
     // A damaged preference must never prevent the editor from opening.
   }
-  const defaultFormat = OFFICIAL_FORMATS.find((format) => format.code === "680") ?? OFFICIAL_FORMATS[0];
+  const defaultFormat = OFFICIAL_FORMATS.find(
+    (format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE,
+  );
   if (defaultFormat) {
     document.title = defaultFormat.code;
     document.sheet = sheetFromFormat(defaultFormat);
@@ -1786,7 +1789,9 @@ function App() {
   const newProject = useCallback(() => {
     const next = createStarterDocument();
     next.printAutomation = clone(documentRef.current.printAutomation ?? DEFAULT_PRINT_AUTOMATION);
-    const defaultFormat = catalog.find((format) => format.code === "680") ?? catalog[0];
+    const defaultFormat = catalog.find(
+      (format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE,
+    );
     if (defaultFormat) {
       next.title = defaultFormat.code;
       next.sheet = sheetFromFormat(defaultFormat);

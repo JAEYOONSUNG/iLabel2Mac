@@ -264,6 +264,24 @@ struct SheetTemplate: Codable, Hashable, Identifiable {
         )
     }
 
+    /// Canonical default shared by every new-document and fallback path.
+    static let default680 = SheetTemplate(
+        id: "680",
+        name: "680 · A4 Label",
+        pageWidthMM: 210,
+        pageHeightMM: 297,
+        columns: 14,
+        rows: 20,
+        labelWidthMM: 12,
+        labelHeightMM: 12,
+        horizontalGapMM: 2,
+        verticalGapMM: 2,
+        marginLeftMM: 8,
+        marginTopMM: 9.5,
+        shape: .circle,
+        cornerRadiusMM: 6
+    )
+
     static let presets: [SheetTemplate] = [
         SheetTemplate(
             id: "a4-2x5-shipping",
@@ -1801,22 +1819,16 @@ struct LabelDocument: Codable, Equatable {
     }
 
     static let starter = LabelDocument(
-        title: "iLabel2Mac Demo",
-        sheet: SheetTemplate.presets[0],
-        elements: [
-            .make(.rectangle, index: 1),
-            .make(.text, index: 1),
-            .make(.text, index: 2),
-            .make(.qrCode, index: 1),
-            .make(.code128, index: 1)
-        ],
+        title: "680",
+        sheet: .default680,
+        elements: [],
         serial: .default,
         dataTable: nil,
         notes: "Use {{Column}}, {{serial}}, {{page}}, {{slot}}, {{row}}, {{date}} placeholders.",
-        formatCode: nil,
-        formatFamily: nil,
-        formatSourceURL: nil,
-        formatPDFTemplateURL: nil,
+        formatCode: "680",
+        formatFamily: .a4Label,
+        formatSourceURL: "https://www.label.kr/Goods/Detail/680",
+        formatPDFTemplateURL: "https://images.label.kr/pds/template/680_line.pdf",
         printAutomation: .default,
         placement: .default
     )

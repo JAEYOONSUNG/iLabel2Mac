@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-private let defaultOfficialFormatCode = "680"
+private let defaultOfficialFormatCode = SheetTemplate.default680.id
 private let cachedPrintAutomationKey = "iLabel2Mac.cachedPrintAutomation"
 private let cachedQuickTextPresetsKey = "iLabel2Mac.cachedQuickTextPresets"
 private let cachedAppearanceModeKey = "iLabel2Mac.cachedAppearanceMode"
@@ -75,7 +75,7 @@ final class DocumentStore: ObservableObject {
 
     init() {
         officialFormats = OfficialFormatCatalog.load()
-        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) ?? officialFormats.first {
+        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) {
             document.sheet = defaultFormat.sheetTemplate
             document.formatCode = defaultFormat.code
             document.formatFamily = defaultFormat.family
@@ -843,7 +843,7 @@ final class DocumentStore: ObservableObject {
     func newDocument() {
         document = .starter
         document.printAutomation = loadCachedPrintAutomation()
-        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) ?? officialFormats.first {
+        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) {
             applyOfficialFormat(defaultFormat, updateTitle: true)
         }
         currentPageIndex = 0

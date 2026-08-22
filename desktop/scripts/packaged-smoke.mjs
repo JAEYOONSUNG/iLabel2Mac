@@ -101,11 +101,16 @@ try {
   const initial = await evaluate(`(async () => ({
     root: Boolean(document.querySelector('#root .app-shell')),
     catalog: document.body.innerText.includes('1,006 matches'),
+    default680:
+      document.querySelector('.format-summary strong')?.textContent.trim() === '680' &&
+      document.querySelector('.format-summary')?.innerText.includes('14×20 · 12 × 12 mm') &&
+      Boolean(document.querySelector('.object-list .empty-state')),
     api: typeof window.iLabelDesktop?.getOSInfo === 'function',
     os: (await window.iLabelDesktop.getOSInfo()).status
   }))()`);
   assert(initial.root, "The React root did not render.");
   assert(initial.catalog, "The official 1,006-format catalog did not load.");
+  assert(initial.default680, "A new packaged app did not start as a blank official 680 document.");
   assert(initial.api && initial.os === "success", "The preload API is unavailable.");
 
   const localFont = await evaluate(`(async () => {

@@ -24,6 +24,26 @@ export const COLORS = {
   ink: { red: 0.12, green: 0.14, blue: 0.18, alpha: 1 },
 } as const satisfies Record<string, RGBAColor>;
 
+export const DEFAULT_OFFICIAL_FORMAT_CODE = "680";
+
+/** Canonical default shared by every new-document and fallback path. */
+export const DEFAULT_680_SHEET: SheetTemplate = {
+  id: DEFAULT_OFFICIAL_FORMAT_CODE,
+  name: "680 · A4 Label",
+  pageWidthMM: 210,
+  pageHeightMM: 297,
+  columns: 14,
+  rows: 20,
+  labelWidthMM: 12,
+  labelHeightMM: 12,
+  horizontalGapMM: 2,
+  verticalGapMM: 2,
+  marginLeftMM: 8,
+  marginTopMM: 9.5,
+  shape: "circle",
+  cornerRadiusMM: 6,
+};
+
 export const SHEET_PRESETS: readonly SheetTemplate[] = [
   {
     id: "a4-2x5-shipping",
@@ -237,17 +257,15 @@ export function makeElement(type: ElementType, index = 1): LabelElement {
 
 export function createStarterDocument(): LabelDocument {
   return {
-    title: "iLabel2Mac Demo",
-    sheet: { ...SHEET_PRESETS[0] },
-    elements: [
-      makeElement("rectangle", 1),
-      makeElement("text", 1),
-      makeElement("text", 2),
-      makeElement("qrCode", 1),
-      makeElement("code128", 1),
-    ],
+    title: DEFAULT_OFFICIAL_FORMAT_CODE,
+    sheet: { ...DEFAULT_680_SHEET },
+    elements: [],
     serial: { ...DEFAULT_SERIAL_SETTINGS },
     notes: "Use {{Column}}, {{serial}}, {{page}}, {{slot}}, {{row}}, {{date}} placeholders.",
+    formatCode: DEFAULT_OFFICIAL_FORMAT_CODE,
+    formatFamily: "a4Label",
+    formatSourceURL: "https://www.label.kr/Goods/Detail/680",
+    formatPDFTemplateURL: "https://images.label.kr/pds/template/680_line.pdf",
     printAutomation: { ...DEFAULT_PRINT_AUTOMATION },
     placement: { ...DEFAULT_PLACEMENT, selectedSlotIndices: [] },
   };

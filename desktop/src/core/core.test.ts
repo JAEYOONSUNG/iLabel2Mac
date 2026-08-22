@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_680_SHEET,
+  DEFAULT_OFFICIAL_FORMAT_CODE,
   MAX_PRINT_BATCH_QUANTITY,
   createStarterDocument,
   makeElement,
 } from "../defaults";
-import type { LabelDocument, PrintBatch, SheetTemplate } from "../types";
+import type {
+  LabelDocument,
+  OfficialFormatPayload,
+  PrintBatch,
+  SheetTemplate,
+} from "../types";
+import officialFormatPayload from "../../../Resources/official_formats.json";
 import { CSVParseError, parseCSV } from "./csv";
 import {
   DocumentCoreError,
@@ -71,18 +79,46 @@ describe("Swift-compatible defaults and normalization", () => {
     const first = createStarterDocument();
     const second = createStarterDocument();
 
-    expect(first.title).toBe("iLabel2Mac Demo");
-    expect(first.elements.map((element) => element.type)).toEqual([
-      "rectangle",
-      "text",
-      "text",
-      "qrCode",
-      "code128",
-    ]);
+    expect(first.title).toBe(DEFAULT_OFFICIAL_FORMAT_CODE);
+    expect(first.sheet).toEqual(DEFAULT_680_SHEET);
+    expect(first.elements).toEqual([]);
+    expect(first).toMatchObject({
+      formatCode: "680",
+      formatFamily: "a4Label",
+      formatSourceURL: "https://www.label.kr/Goods/Detail/680",
+      formatPDFTemplateURL: "https://images.label.kr/pds/template/680_line.pdf",
+    });
     expect(first.serial).toMatchObject({ mode: "rangedSets", start: 1, end: 12 });
-    expect(first.elements[0]!.id).not.toBe(second.elements[0]!.id);
     first.sheet.columns = 99;
-    expect(second.sheet.columns).toBe(2);
+    expect(second.sheet.columns).toBe(14);
+  });
+
+  it("uses the canonical blank 680 document for malformed input", () => {
+    for (const input of [null, [], {}, { formatCode: "680" }]) {
+      expect(normalizeDocument(input)).toEqual(createStarterDocument());
+    }
+  });
+
+  it("matches the single official 680 catalog definition", () => {
+    const formats = (officialFormatPayload as unknown as OfficialFormatPayload).formats;
+    const matches = formats.filter((format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({
+      code: DEFAULT_680_SHEET.id,
+      name: DEFAULT_680_SHEET.name,
+      pageWidthMM: DEFAULT_680_SHEET.pageWidthMM,
+      pageHeightMM: DEFAULT_680_SHEET.pageHeightMM,
+      columns: DEFAULT_680_SHEET.columns,
+      rows: DEFAULT_680_SHEET.rows,
+      labelWidthMM: DEFAULT_680_SHEET.labelWidthMM,
+      labelHeightMM: DEFAULT_680_SHEET.labelHeightMM,
+      horizontalGapMM: DEFAULT_680_SHEET.horizontalGapMM,
+      verticalGapMM: DEFAULT_680_SHEET.verticalGapMM,
+      marginLeftMM: DEFAULT_680_SHEET.marginLeftMM,
+      marginTopMM: DEFAULT_680_SHEET.marginTopMM,
+      shape: DEFAULT_680_SHEET.shape,
+      cornerRadiusMM: DEFAULT_680_SHEET.cornerRadiusMM,
+    });
   });
 
   it("accepts old JSON with omitted optional fields and clamps batch quantities", () => {
@@ -106,8 +142,11 @@ describe("Swift-compatible defaults and normalization", () => {
 
   it("preserves Swift Data fields as base64 strings", () => {
     const source = createStarterDocument();
-    source.elements[0]!.imageData = "iVBORw0KGgo=";
-    source.elements[1]!.richTextRTF = "e1xydGYxIHRlc3R9";
+    const image = makeElement("image", 1);
+    const text = makeElement("text", 1);
+    image.imageData = "iVBORw0KGgo=";
+    text.richTextRTF = "e1xydGYxIHRlc3R9";
+    source.elements = [image, text];
     source.embeddedFonts = [
       { postScriptName: "Example-Regular", familyName: "Example", data: "AAEAAA==" },
     ];

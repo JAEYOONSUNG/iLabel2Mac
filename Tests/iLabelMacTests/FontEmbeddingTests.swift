@@ -5,6 +5,7 @@ import XCTest
 final class FontEmbeddingTests: XCTestCase {
     func testSystemFontsAreNotEmbedded() {
         var doc = LabelDocument.starter
+        doc.elements = [.make(.text, index: 1)]
         for i in doc.elements.indices where doc.elements[i].type == .text {
             doc.elements[i].fontName = "Helvetica" // ships under /System on every Mac
             doc.elements[i].richTextRTF = nil

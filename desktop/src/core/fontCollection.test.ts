@@ -125,7 +125,9 @@ describe("cross-platform font collection", () => {
 
   it("preserves existing embedded data and skips protected faces", async () => {
     const document = createStarterDocument();
-    document.elements[1]!.fontName = "Protected";
+    const text = makeElement("text");
+    text.fontName = "Protected";
+    document.elements = [text];
     document.embeddedFonts = [
       {
         postScriptName: "Existing-Restricted",
