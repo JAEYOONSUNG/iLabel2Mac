@@ -1,0 +1,118 @@
+{
+  "name": "ilabel2-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform iLabel2 label editor for Windows and Linux",
+  "homepage": "https://github.com/JAEYOONSUNG/iLabel2Mac",
+  "desktopName": "iLabel2.desktop",
+  "author": {
+    "name": "Jae-Yoon Sung",
+    "email": "JAEYOONSUNG@users.noreply.github.com"
+  },
+  "license": "UNLICENSED",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -s first \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build": "npm run typecheck && npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win nsis portable --x64",
+    "package:linux": "npm run build && electron-builder --linux AppImage deb --x64"
+  },
+  "devDependencies": {
+    "@types/bwip-js": "3.2.3",
+    "@types/node": "26.2.0",
+    "@types/qrcode": "1.5.6",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
+    "bwip-js": "4.11.4",
+    "concurrently": "10.0.5",
+    "cross-env": "10.1.0",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "happy-dom": "20.11.6",
+    "qrcode": "1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11",
+    "wait-on": "9.1.0"
+  },
+  "build": {
+    "appId": "com.jaeyoon.ilabel2",
+    "productName": "iLabel2",
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
+    "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "../Resources"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "icon": "../Resources/AppIcon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "iLabel2"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-windows-${arch}-portable.${ext}"
+    },
+    "linux": {
+      "executableName": "ilabel2",
+      "icon": "../Resources/AppIcon.iconset/icon_512x512.png",
+      "category": "Graphics",
+      "syncDesktopName": true,
+      "synopsis": "Label editor and printer",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1"
+  }
+}

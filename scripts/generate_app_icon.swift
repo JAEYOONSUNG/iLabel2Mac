@@ -1,7 +1,9 @@
 import AppKit
 import Foundation
 
-let projectRoot = URL(fileURLWithPath: "/Users/JaeYoon/iLabel2Mac")
+let projectRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
 let resourcesURL = projectRoot.appendingPathComponent("Resources", isDirectory: true)
 let iconsetURL = resourcesURL.appendingPathComponent("AppIcon.iconset", isDirectory: true)
 let iconName = "AppIcon"

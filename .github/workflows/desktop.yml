@@ -1,0 +1,114 @@
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "desktop/**"
+      - "Resources/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "Resources/**"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-2022
+            package_script: package:win
+            artifact_name: ilabel2-windows-x64
+            artifact_paths: |
+              desktop/release/*.exe
+              desktop/release/smoke-windows.png
+          - name: Linux x64
+            os: ubuntu-22.04
+            package_script: package:linux
+            artifact_name: ilabel2-linux-x64
+            artifact_paths: |
+              desktop/release/*.AppImage.tar.gz
+              desktop/release/*.deb
+              desktop/release/smoke-linux.png
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux smoke-test display
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Test
+        run: npm test
+
+      - name: Build and package
+        run: npm run ${{ matrix.package_script }}
+
+      - name: Verify packaged app contents
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            asar_path="release/win-unpacked/resources/app.asar"
+          else
+            asar_path="release/linux-unpacked/resources/app.asar"
+          fi
+          test -f "$asar_path"
+          npx --no-install asar list "$asar_path" | grep -q '^/dist/index.html$'
+          npx --no-install asar list "$asar_path" | grep -q '^/dist-electron/main.js$'
+          npx --no-install asar list "$asar_path" | grep -q '^/dist-electron/preload.js$'
+
+      - name: Smoke test Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/packaged-smoke.mjs release/win-unpacked/iLabel2.exe release/smoke-windows.png
+
+      - name: Smoke test Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a node scripts/packaged-smoke.mjs release/linux-unpacked/ilabel2 release/smoke-linux.png
+
+      - name: Preserve AppImage executable mode
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          appimage_path="$(find release -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$appimage_path"
+          tar -czf "${appimage_path}.tar.gz" -C release "$(basename "$appimage_path")"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14

@@ -1,5 +1,9 @@
 .DS_Store
 .build/
 dist/
+dist-electron/
+release/
+node_modules/
 *.swp
 *.tmp
+*.log
