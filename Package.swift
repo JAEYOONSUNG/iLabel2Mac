@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "iLabel2Mac",
+    name: "iLabelStudio",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "iLabel2Mac", targets: ["iLabelMac"])
+        .executable(name: "iLabelStudio", targets: ["iLabelMac"])
     ],
     targets: [
         .executableTarget(

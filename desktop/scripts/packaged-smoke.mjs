@@ -106,19 +106,22 @@ try {
     const ready = await evaluate(`Boolean(
       document.readyState === 'complete' &&
       document.querySelector('#root .app-shell') &&
-      typeof window.iLabelDesktop?.getOSInfo === 'function'
+      typeof window.iLabelDesktop?.getOSInfo === 'function' &&
+      document.documentElement.dataset.theme === 'light'
     )`);
     if (ready) break;
     await delay(100);
   }
   const rendererReady = await evaluate(`Boolean(
     document.querySelector('#root .app-shell') &&
-    typeof window.iLabelDesktop?.getOSInfo === 'function'
+    typeof window.iLabelDesktop?.getOSInfo === 'function' &&
+    document.documentElement.dataset.theme === 'light'
   )`);
   assert(rendererReady, "The packaged renderer or preload bridge did not become ready.");
   await evaluate("document.fonts.ready");
   const initial = await evaluate(`(async () => ({
     root: Boolean(document.querySelector('#root .app-shell')),
+    brand: document.title === 'iLabel Studio',
     catalog: document.body.innerText.includes('1,006 matches'),
     default680:
       document.querySelector('.format-summary strong')?.textContent.trim() === '680' &&
@@ -129,6 +132,7 @@ try {
     os: (await window.iLabelDesktop.getOSInfo()).status
   }))()`);
   assert(initial.root, "The React root did not render.");
+  assert(initial.brand, "The packaged app did not use the iLabel Studio title.");
   assert(initial.catalog, "The official 1,006-format catalog did not load.");
   assert(initial.default680, "A new packaged app did not start as a blank official 680 document.");
   assert(initial.nativeTheme, "A fresh packaged app did not start with the native light appearance.");

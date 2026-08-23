@@ -757,7 +757,7 @@ enum PageRenderer {
         }
         let safeTitle = document.title.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("iLabel2Mac-\(safeTitle)-p\(pageIndex + 1)-\(UUID().uuidString).pdf")
+            .appendingPathComponent("iLabel-Studio-\(safeTitle)-p\(pageIndex + 1)-\(UUID().uuidString).pdf")
         do {
             try data.write(to: url, options: .atomic)
             return url
@@ -775,7 +775,7 @@ enum PageRenderer {
         }
         let safeTitle = document.title.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("iLabel2Mac-print-\(safeTitle)-p\(pageIndex + 1)-\(UUID().uuidString).pdf")
+            .appendingPathComponent("iLabel-Studio-print-\(safeTitle)-p\(pageIndex + 1)-\(UUID().uuidString).pdf")
         do {
             try data.write(to: url, options: .atomic)
             return url

@@ -1,16 +1,18 @@
-# iLabel2
+# iLabel Studio
 
-<img width="5128" height="2830" alt="iLabel2 label editor" src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" />
+<img width="5128" height="2830" alt="iLabel Studio label editor" src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" />
 
-`iLabel2` is a precision label editor and printer for `label.kr`-style sheets and custom roll labels. It ships as a native SwiftUI app on macOS and as a feature-equivalent Electron app on Windows and Linux. The editions share the same project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.
+`iLabel Studio` is a cross-platform precision label editor and printer built around **iLabel label sheets from `label.kr`**, while also supporting custom sheets and roll labels. It ships as a native SwiftUI app on macOS and as a feature-equivalent Electron app on Windows and Linux. Every edition shares the same project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.
 
 ## Install on macOS
 
-Download `iLabel2Mac.dmg` from the latest release:
+Download `iLabel-Studio-macOS.dmg` from the latest release:
 
-https://github.com/JAEYOONSUNG/iLabel2Mac/releases/latest
+https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest
 
-Open the DMG, drag `iLabel2Mac.app` to `Applications`, then launch it.
+Open the DMG, drag `iLabel Studio.app` to `Applications`, then launch it.
+
+Upgrading from the former `iLabel2Mac.app`? Quit the old app, install `iLabel Studio.app`, then remove the old app bundle. Existing projects and saved app preferences remain compatible.
 
 ## Install on Windows and Linux
 
@@ -19,7 +21,7 @@ Windows and Linux packages are built from [`desktop/`](desktop/):
 - Windows x64: NSIS installer and portable `.exe`
 - Linux x64: AppImage and Debian `.deb`
 
-Every desktop change is packaged and exercised by [the desktop workflow](.github/workflows/desktop.yml). Open a successful run in [GitHub Actions](https://github.com/JAEYOONSUNG/iLabel2Mac/actions/workflows/desktop.yml) and download its `ilabel2-windows-x64` or `ilabel2-linux-x64` artifact:
+Every desktop change is packaged and exercised by [the desktop workflow](.github/workflows/desktop.yml). Open a successful run in [GitHub Actions](https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml) and download its `ilabel-studio-windows-x64` or `ilabel-studio-linux-x64` artifact:
 
 - Windows: choose the NSIS setup `.exe` or the standalone portable `.exe`.
 - Linux: choose the AppImage `.tar.gz` or Debian `.deb` package.
@@ -54,7 +56,7 @@ The light-theme demo uses the Windows/Linux edition and captures **8 labels** (`
 ## Features
 
 - Native SwiftUI app for macOS and a feature-equivalent Electron app for Windows/Linux
-- 1,006 official `label.kr` formats, with every new project starting from official format `680`, plus editable custom sheet/roll geometry
+- 1,006 official iLabel paper formats from `label.kr`, with every new project starting from iLabel format `680`, plus editable custom sheet/roll geometry
 - Text, shape, image, QR, and Code128 elements
 - Selection-level rich text: font, size, bold, italic, underline, and RGBA color
 - macOS RTF compatibility and project-embedded TTF, OTF, WOFF, WOFF2, TTC, and OTC fonts

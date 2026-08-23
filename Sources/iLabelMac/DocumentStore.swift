@@ -1104,7 +1104,7 @@ final class DocumentStore: ObservableObject {
             let data = try JSONEncoder.pretty.encode(documentToSave)
             let targetURL = try saveURL(
                 existingURL: projectURL,
-                suggestedName: "\(document.title.replacingOccurrences(of: " ", with: "-")).ilabelmac.json",
+                suggestedName: "\(document.title.replacingOccurrences(of: " ", with: "-")).ilabel.json",
                 allowedTypes: [.json]
             )
             try data.write(to: targetURL, options: .atomic)

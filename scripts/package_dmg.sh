@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/iLabel2Mac.app"
-DMG_PATH="$ROOT_DIR/dist/iLabel2Mac.dmg"
-VOL_NAME="iLabel2Mac"
-STAGING_DIR="$(mktemp -d /tmp/iLabel2Mac-dmg.XXXXXX)"
+APP_DIR="$ROOT_DIR/dist/iLabel Studio.app"
+DMG_PATH="$ROOT_DIR/dist/iLabel-Studio-macOS.dmg"
+VOL_NAME="iLabel Studio"
+STAGING_DIR="$(mktemp -d /tmp/iLabel-Studio-dmg.XXXXXX)"
 
 cleanup() {
   rm -rf "$STAGING_DIR"

@@ -259,10 +259,10 @@ function decodeText(buffer: Buffer): string {
 
 async function openProject(): Promise<IpcResult<{ path: string; name: string; text: string }>> {
   const result = await openTextFile({
-    title: "Open iLabel2 Project",
+    title: "Open iLabel Studio Project",
     properties: ["openFile"],
     filters: [
-      { name: "iLabel2 project", extensions: ["json"] },
+      { name: "iLabel Studio project", extensions: ["json"] },
       { name: "All files", extensions: ["*"] },
     ],
   });
@@ -289,9 +289,9 @@ async function saveProject(request: SaveProjectRequest): Promise<IpcResult<{ pat
 
   if (!targetPath) {
     const options: SaveDialogOptions = {
-      title: "Save iLabel2 Project",
+      title: "Save iLabel Studio Project",
       defaultPath: suggestedName,
-      filters: [{ name: "iLabel2 project", extensions: ["json"] }],
+      filters: [{ name: "iLabel Studio project", extensions: ["json"] }],
     };
     const result = await dialog.showSaveDialog(requireMainWindow(), options);
     if (result.canceled || !result.filePath) return cancelled();
@@ -406,7 +406,7 @@ function validatePrintableRequest(request: PrintableHTMLRequest): PrintableHTMLR
 
 function printableHTML(request: PrintableHTMLRequest): string {
   const policy = "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; script-src 'none'; connect-src 'none'; media-src data: blob:";
-  const title = (request.jobTitle || "iLabel2")
+  const title = (request.jobTitle || "iLabel Studio")
     .slice(0, 128)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -528,7 +528,7 @@ async function printHTML(request: PrintableHTMLRequest): Promise<IpcResult<{ job
   validatePrintableRequest(request);
   const jobTitle = typeof request.jobTitle === "string" && request.jobTitle.trim()
     ? request.jobTitle.trim().slice(0, 128)
-    : "iLabel2";
+    : "iLabel Studio";
   const baselineJobIDs = await pendingPrintJobIDs().catch(() => null);
 
   return withPrintableWindow(request, (window) => new Promise<IpcResult<{ jobTitle: string; baselineJobIDs?: string[] }>>((resolve) => {
@@ -865,7 +865,7 @@ function windowsProfileXML(profileName: string, ssid: string, password?: string)
 }
 
 async function addTemporaryWindowsProfile(request: WifiRequest): Promise<string> {
-  const profileName = `iLabel2-${randomUUID()}`;
+  const profileName = `iLabel-Studio-${randomUUID()}`;
   const directory = await mkdtemp(path.join(app.getPath("temp"), "ilabel2-wifi-"));
   const profilePath = path.join(directory, "profile.xml");
   try {

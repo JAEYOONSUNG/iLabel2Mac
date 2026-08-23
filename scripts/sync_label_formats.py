@@ -17,7 +17,7 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_JSON = ROOT / "Resources" / "official_formats.json"
-USER_AGENT = "iLabel2Mac format sync/0.1 (+local build)"
+USER_AGENT = "iLabel Studio format sync/0.1 (+local build)"
 
 
 LIST_SOURCES = [

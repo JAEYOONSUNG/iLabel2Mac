@@ -2,8 +2,8 @@
   "name": "ilabel2-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Cross-platform iLabel2 label editor for Windows and Linux",
-  "homepage": "https://github.com/JAEYOONSUNG/iLabel2Mac",
+  "description": "Cross-platform iLabel paper editor and printer",
+  "homepage": "https://github.com/JAEYOONSUNG/iLabel-Studio",
   "desktopName": "iLabel2.desktop",
   "author": {
     "name": "Jae-Yoon Sung",
@@ -48,7 +48,7 @@
   },
   "build": {
     "appId": "com.jaeyoon.ilabel2",
-    "productName": "iLabel2",
+    "productName": "iLabel Studio",
     "asar": true,
     "electronFuses": {
       "runAsNode": false,
@@ -72,8 +72,9 @@
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "iLabel-Studio-${version}-${os}-${arch}.${ext}",
     "win": {
+      "executableName": "iLabel2",
       "icon": "../Resources/AppIcon.ico",
       "target": [
         {
@@ -91,15 +92,15 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}",
+      "artifactName": "iLabel-Studio-${version}-windows-${arch}-setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "iLabel2"
+      "shortcutName": "iLabel Studio"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-windows-${arch}-portable.${ext}"
+      "artifactName": "iLabel-Studio-${version}-windows-${arch}-portable.${ext}"
     },
     "linux": {
       "executableName": "ilabel2",

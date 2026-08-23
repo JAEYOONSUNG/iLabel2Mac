@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/iLabel2Mac.app"
+APP_DIR="$ROOT_DIR/dist/iLabel Studio.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
 # Universal (arm64 + x86_64) binary so the app runs on both Apple Silicon and Intel Macs.
-BUILD_BIN="$ROOT_DIR/.build/apple/Products/Release/iLabel2Mac"
+BUILD_BIN="$ROOT_DIR/.build/apple/Products/Release/iLabelStudio"
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
@@ -14,9 +14,9 @@ cd "$ROOT_DIR"
 swift build -c release --arch arm64 --arch x86_64
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-cp "$BUILD_BIN" "$MACOS_DIR/iLabel2Mac"
-chmod +x "$MACOS_DIR/iLabel2Mac"
-lipo -archs "$MACOS_DIR/iLabel2Mac"
+cp "$BUILD_BIN" "$MACOS_DIR/iLabelStudio"
+chmod +x "$MACOS_DIR/iLabelStudio"
+lipo -archs "$MACOS_DIR/iLabelStudio"
 if [ -f "$ROOT_DIR/Resources/official_formats.json" ]; then
   cp "$ROOT_DIR/Resources/official_formats.json" "$RESOURCES_DIR/official_formats.json"
 fi
@@ -32,19 +32,19 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>iLabel2Mac</string>
+    <string>iLabelStudio</string>
     <key>CFBundleDisplayName</key>
-    <string>iLabel2Mac</string>
+    <string>iLabel Studio</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>local.jaeyoon.iLabel2Mac</string>
     <key>CFBundleGetInfoString</key>
-    <string>iLabel2Mac by Jae-Yoon Sung</string>
+    <string>iLabel Studio by Jae-Yoon Sung</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>iLabel2Mac</string>
+    <string>iLabel Studio</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

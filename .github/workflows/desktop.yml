@@ -26,14 +26,14 @@ jobs:
           - name: Windows x64
             os: windows-2022
             package_script: package:win
-            artifact_name: ilabel2-windows-x64
+            artifact_name: ilabel-studio-windows-x64
             artifact_paths: |
               desktop/release/*.exe
               desktop/release/smoke-windows.png
           - name: Linux x64
             os: ubuntu-22.04
             package_script: package:linux
-            artifact_name: ilabel2-linux-x64
+            artifact_name: ilabel-studio-linux-x64
             artifact_paths: |
               desktop/release/*.AppImage.tar.gz
               desktop/release/*.deb

@@ -451,7 +451,7 @@ enum WiFiPrintAutomation {
                 // telltale of missing Location Services access, which also
                 // makes associate() fail with -3900 tmpErr.
                 throw WiFiAutomationError.commandFailed(
-                    "macOS blocked the Wi-Fi switch. Allow Location Services for iLabel2Mac (System Settings → Privacy & Security → Location Services), then print again. (\(error.localizedDescription))"
+                    "macOS blocked the Wi-Fi switch. Allow Location Services for iLabel Studio (System Settings → Privacy & Security → Location Services), then print again. (\(error.localizedDescription))"
                 )
             }
             throw WiFiAutomationError.commandFailed("Joining \(ssid) failed: \(error.localizedDescription)")
