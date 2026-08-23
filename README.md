@@ -40,16 +40,16 @@ npm run package:linux  # run on Linux
 
 For development, use Node.js 22 and run `npm run dev` in `desktop/`. The workflow launches each packaged executable—not only the development server—and verifies the renderer, preload bridge, 1,006-format catalog, rich text, embedded fonts, PDF dimensions, circular layout, placement selection, and capture queue before publishing artifacts.
 
-## Quick workflow: quantities and consecutive captures
+## Quick workflow: create a label and capture consecutive runs
 
-![Adjust label quantities and capture multiple print runs](docs/assets/capture-queue-workflow.gif)
+![Create label content, adjust quantities, and capture multiple print runs](docs/assets/capture-queue-workflow.gif)
 
-The light-theme demo uses the Windows/Linux edition and captures **8 labels** (`End 4 × Repeat 2`), then stages an empty position and captures **3 more labels** (`End 3 × Repeat 1`).
+The light-theme demo uses the Windows/Linux edition. It adds a Text object, types `Sample {{serial}}`, switches to Page Preview, captures **8 labels** (`End 4 × Repeat 2`), then stages an empty position and captures **3 more labels** (`End 3 × Repeat 1`).
 
-1. Set the quantity with **Start**, **End**, **Step**, and **Repeat**. With CSV data, one label is generated per imported row.
-2. Click a slot in **Page Preview** to choose where the run starts.
-3. Choose **Capture Current Setup**. The artwork, data, quantity, page, and start position are locked together.
-4. Click another empty label position to stage the next capture. Use **Next** if you want to start on a blank sheet; the capture button stays disabled until a valid position is staged.
+1. Add **Text**, enter the label content or merge tokens, then switch to **Page Preview**. The large label canvas shows exactly what each printed cell contains.
+2. Set the quantity with **Start**, **End**, **Step**, and **Repeat**. With CSV data, one label is generated per imported row.
+3. Click a label cell to choose where the run starts, then choose **Capture Current Setup**. The artwork, data, quantity, page, and start position are locked together.
+4. Click another empty label cell to stage the next capture. Use **Next** if you want to start on a blank sheet; the capture button stays disabled until a valid position is staged.
 5. Adjust the next run's quantity, then choose **Capture Current Setup** again.
 6. Reorder or remove captured runs if needed, then choose **Print Captures** to print the complete queue as one multi-page job.
 

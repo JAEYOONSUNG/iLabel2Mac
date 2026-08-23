@@ -111,11 +111,16 @@ const clip = {
 };
 
 async function captureFrame() {
-  const screenshot = await command("Page.captureScreenshot", {
-    format: "png",
-    fromSurface: true,
-    clip,
-  });
+  let screenshot;
+  try {
+    screenshot = await command("Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      clip,
+    });
+  } catch (error) {
+    throw new Error(`README capture failed at frame ${frameIndex + 1}`, { cause: error });
+  }
   frameIndex += 1;
   const filename = `frame-${String(frameIndex).padStart(4, "0")}.png`;
   await writeFile(path.join(framesDirectory, filename), Buffer.from(screenshot.data, "base64"));
@@ -186,6 +191,42 @@ async function setNumber(label, value) {
     input.blur();
   })()`);
   await hold(4);
+}
+
+async function typeLabelContent(value) {
+  const selector = '[contenteditable="true"][aria-label="Text content"]';
+  await moveCursor(selector);
+  await pulseCursor();
+  await evaluate(`(() => {
+    const editor = document.querySelector(${JSON.stringify(selector)});
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand('delete');
+  })()`);
+  await delay(80);
+  for (const character of value) {
+    await command("Input.insertText", { text: character });
+    await hold(1);
+  }
+  await evaluate(`document.querySelector(${JSON.stringify(selector)}).blur()`);
+  let entered;
+  const deadline = Date.now() + 3_000;
+  do {
+    entered = await evaluate(`(() => ({
+      editor: document.querySelector(${JSON.stringify(selector)})?.innerText,
+      preview: document.querySelector('.label-board .svg-surface [data-element-type="text"] text')?.textContent
+    }))()`);
+    if (entered.editor === value && entered.preview?.includes("Sample (1)")) break;
+    await delay(80);
+  } while (Date.now() < deadline);
+  if (entered.editor !== value || !entered.preview?.includes("Sample (1)")) {
+    throw new Error(`Label entry did not reach the editor and preview: ${JSON.stringify(entered)}`);
+  }
+  await hold(5);
 }
 
 async function selectSlot(slotIndex) {
@@ -260,10 +301,17 @@ try {
     }
   })()`);
 
-  await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Text').click()`);
-  await delay(250);
-  await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Page').click()`);
-  await delay(350);
+  await caption("1 · Add a Text object to the label");
+  await hold(6);
+  await clickButton("Text");
+  await hold(4);
+
+  await caption("2 · Type the label content and serial token");
+  await typeLabelContent("Sample {{serial}}");
+
+  await caption("3 · Switch to the full Page Preview");
+  await clickButton("Page");
+  await hold(4);
   await evaluate(`(() => {
     for (const button of document.querySelectorAll('button')) {
       const label = button.textContent.trim();
@@ -276,37 +324,41 @@ try {
     }
   })()`);
 
-  await caption("1 · Set End 4 × Repeat 2 = 8 labels");
-  await hold(10);
+  await caption("4 · Set End 4 × Repeat 2 = 8 labels");
+  await hold(6);
   await setNumber("End", 4);
   await setNumber("Repeat", 2);
-  await hold(8);
+  await hold(4);
 
-  await caption("2 · Choose the first label position");
+  await caption("5 · Choose the first label position");
   await selectSlot(0);
-  await hold(7);
+  await hold(4);
 
-  await caption("3 · Capture Current Setup locks those 8 labels");
+  await caption("6 · Capture Current Setup locks those 8 labels");
   await clickButton("Capture Current Setup");
-  await hold(10);
+  await hold(6);
 
-  await caption("4 · Click another empty position for the next capture");
+  await caption("7 · Click another empty position for the next capture");
   await selectSlot(8);
-  await hold(8);
+  await hold(4);
 
-  await caption("5 · Change the next run to 3 labels");
+  await caption("8 · Change the next run to 3 labels");
   await setNumber("End", 3);
   await setNumber("Repeat", 1);
-  await hold(8);
+  await hold(4);
 
-  await caption("6 · Capture again — both setups stay locked in the queue");
+  await caption("9 · Capture again — both setups stay locked in the queue");
   await clickButton("Capture Current Setup");
-  await hold(12);
+  await hold(8);
 
   await caption("Ready · Print Captures sends the complete queue");
   await refreshButtonTargets();
   await moveCursor('[data-demo-label="Print Captures"]');
-  await hold(14);
+  await hold(8);
+
+  if (frameIndex > 220) {
+    throw new Error(`README demo is too long: ${frameIndex} frames`);
+  }
 
   const ffmpeg = spawnSync("ffmpeg", [
     "-y",

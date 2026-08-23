@@ -1417,18 +1417,29 @@ function PageBoard({
           const left = document.sheet.marginLeftMM + column * (document.sheet.labelWidthMM + document.sheet.horizontalGapMM);
           const top = document.sheet.marginTopMM + row * (document.sheet.labelHeightMM + document.sheet.verticalGapMM);
           const payload = renderPayload(document, slotIndex, pageIndex);
+          const cornerRadiusMM = Math.min(
+            Math.max(0, document.sheet.cornerRadiusMM),
+            Math.min(document.sheet.labelWidthMM, document.sheet.labelHeightMM) / 2,
+          );
+          const cornerRadiusXPX = cornerRadiusMM
+            * (board.width / Math.max(document.sheet.pageWidthMM, 0.1));
+          const cornerRadiusYPX = cornerRadiusMM
+            * (board.height / Math.max(document.sheet.pageHeightMM, 0.1));
           return (
             <button
               key={slotIndex}
               data-slot-index={slotIndex}
               aria-label={`Start at row ${row + 1}, column ${column + 1}`}
-              className={`page-slot-hit ${conflictSlots.has(slotIndex) ? "conflict" : payload.batchID === draftBatchID ? "draft" : payload.batchID ? "captured" : payload.context.isActive ? "active" : ""}`}
+              className={`page-slot-hit shape-${document.sheet.shape} ${conflictSlots.has(slotIndex) ? "conflict" : payload.batchID === draftBatchID ? "draft" : payload.batchID ? "captured" : payload.context.isActive ? "active" : ""}`}
+              data-label-shape={document.sheet.shape}
               style={{
                 left: `${(left / document.sheet.pageWidthMM) * 100}%`,
                 top: `${(top / document.sheet.pageHeightMM) * 100}%`,
                 width: `${(document.sheet.labelWidthMM / document.sheet.pageWidthMM) * 100}%`,
                 height: `${(document.sheet.labelHeightMM / document.sheet.pageHeightMM) * 100}%`,
-              }}
+                "--slot-corner-radius-x": `${cornerRadiusXPX}px`,
+                "--slot-corner-radius-y": `${cornerRadiusYPX}px`,
+              } as CSSProperties}
               onPointerDown={(event) => {
                 if (event.button !== 0) return;
                 event.preventDefault();

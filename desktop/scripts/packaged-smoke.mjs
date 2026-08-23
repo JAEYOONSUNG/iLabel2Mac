@@ -145,6 +145,7 @@ try {
     const preview = rect('.preview-column');
     const previewControls = rect('.preview-controls');
     const app = document.querySelector('.app-shell');
+    const firstSlot = document.querySelector('.page-slot-hit');
     const normalizedText = (value) => value.replace(/\\s+/g, ' ').trim();
     const resetArea = [...document.querySelectorAll('.preview-legend button')]
       .some((button) => normalizedText(button.textContent ?? '') === 'Reset Area');
@@ -165,6 +166,8 @@ try {
       previewControlsHeight: previewControls?.height ?? null,
       columnLabels: document.querySelectorAll('.page-column-axis > span').length,
       rowLabels: document.querySelectorAll('.page-row-axis > span').length,
+      slotShape: firstSlot?.dataset.labelShape ?? null,
+      slotRadius: firstSlot ? getComputedStyle(firstSlot, '::before').borderRadius : null,
       resetArea,
       legend: Boolean(
         legend &&
@@ -208,6 +211,10 @@ try {
     `Default 14×20 page axes are incomplete: ${parityState}`,
   );
   assert(
+    parity.slotShape === "circle" && parity.slotRadius === "50%",
+    `Active slot chrome does not follow the circular 680 label shape: ${parityState}`,
+  );
+  assert(
     parity.resetArea && parity.legend,
     `Reset Area or the print-state legend is missing: ${parityState}`,
   );
@@ -215,6 +222,47 @@ try {
   assert(
     !parity.horizontalOverflow && parity.appInsideViewport,
     `The packaged app has horizontal root overflow: ${parityState}`,
+  );
+
+  const shapeChrome = {};
+  for (const shape of ["rectangle", "roundedRectangle", "capsule", "circle"]) {
+    await evaluate(`(() => {
+      const select = document.querySelector('.sheet-final-grid select');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, ${JSON.stringify(shape)});
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await delay(150);
+    shapeChrome[shape] = await evaluate(`(() => {
+      const slot = document.querySelector('.page-slot-hit');
+      return {
+        shape: slot?.dataset.labelShape,
+        radius: slot ? getComputedStyle(slot, '::before').borderRadius : null
+      };
+    })()`);
+  }
+  assert(
+    shapeChrome.rectangle.shape === "rectangle" && shapeChrome.rectangle.radius === "0px" &&
+      shapeChrome.roundedRectangle.shape === "roundedRectangle" && Number.parseFloat(shapeChrome.roundedRectangle.radius) > 0 &&
+      shapeChrome.capsule.shape === "capsule" && Number.parseFloat(shapeChrome.capsule.radius) >= 999 &&
+      shapeChrome.circle.shape === "circle" && shapeChrome.circle.radius === "50%",
+    `Page slot chrome does not follow every label shape: ${JSON.stringify(shapeChrome)}`,
+  );
+  await evaluate(`(() => {
+    const format680 = [...document.querySelectorAll('.format-row')]
+      .find((row) => row.querySelector('strong')?.textContent.trim() === '680');
+    if (!format680) throw new Error('Official format 680 is missing from the format list.');
+    format680.click();
+  })()`);
+  await delay(200);
+  const restored680 = await evaluate(`({
+    code: document.querySelector('.format-summary strong')?.textContent.trim(),
+    shape: document.querySelector('.page-slot-hit')?.dataset.labelShape
+  })`);
+  assert(
+    restored680.code === "680" && restored680.shape === "circle",
+    `Shape testing did not restore official format 680: ${JSON.stringify(restored680)}`,
   );
 
   const localFont = await evaluate(`(async () => {

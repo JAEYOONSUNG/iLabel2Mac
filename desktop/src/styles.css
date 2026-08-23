@@ -960,35 +960,67 @@ input[type="color"] {
   z-index: 3;
   min-height: 0;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 2px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
-.page-slot-hit:hover,
-.page-slot-hit.selected,
-.page-slot-hit.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.page-slot-hit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  pointer-events: none;
 }
 
-.page-slot-hit.captured {
+.page-slot-hit.shape-roundedRectangle::before {
+  border-radius: var(--slot-corner-radius-x, 0) / var(--slot-corner-radius-y, 0);
+}
+
+.page-slot-hit.shape-capsule::before {
+  border-radius: 999px;
+}
+
+.page-slot-hit.shape-circle::before {
+  border-radius: 50%;
+}
+
+.page-slot-hit:hover::before {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.page-slot-hit.active::before,
+.page-slot-hit.captured::before {
+  border-width: 1.4px;
   border-color: color-mix(in srgb, var(--accent) 75%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.page-slot-hit.draft {
+.page-slot-hit.draft::before {
+  border-width: 1.4px;
+  border-style: dashed;
   border-color: var(--orange);
   background: color-mix(in srgb, var(--orange) 13%, transparent);
 }
 
-.page-slot-hit.conflict {
+.page-slot-hit.conflict::before {
+  border-width: 1.4px;
   border-color: var(--danger);
   background: repeating-linear-gradient(
     135deg,
     color-mix(in srgb, var(--danger) 14%, transparent) 0 3px,
     transparent 3px 6px
   );
+}
+
+.page-slot-hit:focus-visible {
+  outline: none;
+}
+
+.page-slot-hit:focus-visible::before {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .preview-column {
