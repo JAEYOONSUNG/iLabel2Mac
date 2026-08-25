@@ -1,0 +1,97 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#5B8CF7"/>
+      <stop offset="0.55" stop-color="#2F5AE0"/>
+      <stop offset="1" stop-color="#1B36A8"/>
+    </linearGradient>
+    <!-- subtle top sheen -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.4" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- sticker face -->
+    <linearGradient id="sticker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9EEF9"/>
+    </linearGradient>
+    <!-- peel underside -->
+    <linearGradient id="peel" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#9DAFD4"/>
+      <stop offset="0.55" stop-color="#CFDAF0"/>
+      <stop offset="1" stop-color="#F6F9FE"/>
+    </linearGradient>
+    <!-- soft drop shadow for stickers -->
+    <filter id="drop" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0A1A55" flood-opacity="0.35"/>
+    </filter>
+    <filter id="blurS" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="186"/>
+    </clipPath>
+  </defs>
+
+  <!-- canvas squircle -->
+  <g clip-path="url(#squircle)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+
+    <!-- faint die-cut label sheet grid -->
+    <g fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="4">
+      <g>
+        <rect x="52"  y="128" width="200" height="132" rx="28"/>
+        <rect x="52"  y="300" width="200" height="132" rx="28"/>
+        <rect x="52"  y="472" width="200" height="132" rx="28"/>
+        <rect x="52"  y="644" width="200" height="132" rx="28"/>
+        <rect x="52"  y="816" width="200" height="132" rx="28"/>
+        <rect x="292" y="128" width="200" height="132" rx="28"/>
+        <rect x="292" y="816" width="200" height="132" rx="28"/>
+        <rect x="532" y="128" width="200" height="132" rx="28"/>
+        <rect x="532" y="816" width="200" height="132" rx="28"/>
+        <rect x="772" y="128" width="200" height="132" rx="28"/>
+        <rect x="772" y="300" width="200" height="132" rx="28"/>
+        <rect x="772" y="472" width="200" height="132" rx="28"/>
+        <rect x="772" y="644" width="200" height="132" rx="28"/>
+        <rect x="772" y="816" width="200" height="132" rx="28"/>
+      </g>
+    </g>
+
+    <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"/>
+
+    <!-- ===== the "i" built from two stickers ===== -->
+
+    <!-- dot sticker -->
+    <circle cx="512" cy="302" r="96" fill="url(#sticker)" filter="url(#drop)"/>
+
+    <!-- stem sticker with peeled corner -->
+    <g filter="url(#drop)">
+      <path d="M 446 430
+               H 578
+               Q 622 430 622 474
+               V 682
+               L 514 790
+               H 446
+               Q 402 790 402 746
+               V 474
+               Q 402 430 446 430 Z"
+            fill="url(#sticker)"/>
+    </g>
+
+    <!-- shadow cast by the lifted flap -->
+    <path d="M 622 682 L 514 790 L 590 772 Q 622 725 622 682 Z"
+          fill="#0A1A55" opacity="0.30" filter="url(#blurS)"/>
+
+    <!-- the curled flap (underside showing) -->
+    <path d="M 622 682
+             C 602 728 561 764 514 790
+             C 507 746 511 714 527 697
+             C 549 683 586 680 622 682 Z"
+          fill="url(#peel)"/>
+  </g>
+
+  <!-- inner rim light -->
+  <rect x="102.5" y="102.5" width="819" height="819" rx="184" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="3"/>
+</svg>
