@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iLabel Studio — Design, number, and print labels in one place</title>
+<meta name="description" content="iLabel Studio is a precision label editor and printer for iLabel sheets, custom sheets, and roll labels. Native on macOS, feature-equivalent on Windows and Linux.">
+<meta property="og:title" content="iLabel Studio">
+<meta property="og:description" content="Design, number, and print labels in one place. Free for macOS, Windows, and Linux.">
+<meta property="og:image" content="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink: #18181B;
+    --body: #52525B;
+    --soft: #71717A;
+    --surface: #F4F4F5;
+    --border: #E4E4E7;
+    --accent: #00A7F5;
+    --tint: #DFF2FE;
+    --r-card: 30px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: #fff;
+    color: var(--ink);
+    font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; display: block; }
+  a { color: inherit; text-decoration: none; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  h1, h2, h3, .display {
+    font-family: "Inter Tight", "Inter", sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(228,228,231,0.6);
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
+  .brand img { width: 28px; height: 28px; }
+  .nav-links { display: flex; align-items: center; gap: 28px; font-size: 14.5px; font-weight: 500; color: var(--body); }
+  .nav-links a:hover { color: var(--ink); }
+  @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    border-radius: 999px;
+    font-weight: 500; font-size: 15px;
+    padding: 12px 24px;
+    transition: transform 0.15s ease, background 0.15s ease;
+    cursor: pointer;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-dark { background: var(--ink); color: #fff; }
+  .btn-dark:hover { background: #27272A; }
+  .btn-light { background: var(--surface); color: var(--ink); }
+  .btn-light:hover { background: #E4E4E7; }
+  .btn-white { background: #fff; color: var(--ink); }
+  .btn-sm { padding: 9px 18px; font-size: 14px; }
+
+  /* ---------- hero ---------- */
+  header.container { padding: 160px 24px 0; text-align: center; }
+  header h1 {
+    font-size: clamp(42px, 6.4vw, 74px);
+    max-width: 15ch; margin: 0 auto;
+  }
+  header .sub {
+    color: var(--soft); font-size: clamp(17px, 2vw, 20px);
+    max-width: 52ch; margin: 24px auto 0;
+  }
+  .cta-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
+  .trust { color: var(--soft); font-size: 13.5px; margin-top: 16px; }
+  .hero-shot { margin: 64px auto 0; }
+  .frame {
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    overflow: hidden;
+    box-shadow: 0 24px 60px -24px rgba(24,24,27,0.18);
+    background: var(--surface);
+  }
+
+  /* ---------- big statement ---------- */
+  .statement.container { padding: 140px 24px 40px; text-align: center; }
+  .statement p {
+    font-family: "Inter Tight", sans-serif; font-weight: 500;
+    letter-spacing: -0.03em; line-height: 1.15;
+    font-size: clamp(30px, 4.6vw, 52px);
+    max-width: 22ch; margin: 0 auto; text-wrap: balance;
+  }
+  .statement .dim { color: #A1A1AA; }
+
+  /* ---------- sections ---------- */
+  section.container { padding: 90px 24px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--tint); color: #0284C7;
+    border-radius: 999px; padding: 6px 14px;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+    margin-bottom: 20px;
+  }
+  section h2 { font-size: clamp(30px, 4vw, 44px); max-width: 20ch; }
+  section .lede { color: var(--soft); font-size: 17px; max-width: 56ch; margin-top: 16px; }
+
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 44px; }
+  @media (max-width: 860px) { .cards { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border-radius: var(--r-card);
+    padding: 30px 28px;
+  }
+  .card .glyph {
+    width: 44px; height: 44px; border-radius: 14px;
+    background: #fff; border: 1px solid var(--border);
+    display: grid; place-items: center; margin-bottom: 18px;
+    font-size: 20px;
+  }
+  .card h3 { font-size: 19px; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .card p { color: var(--body); font-size: 15px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 56px; align-items: center; margin-top: 44px; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; gap: 32px; } }
+  .split ul { list-style: none; padding: 0; margin-top: 24px; display: grid; gap: 14px; }
+  .split li { display: flex; gap: 12px; color: var(--body); font-size: 15.5px; }
+  .split li::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 99px; background: var(--accent); margin-top: 8px; }
+
+  /* ---------- tinted band ---------- */
+  .band {
+    background: var(--tint); border-radius: var(--r-card);
+    padding: clamp(40px, 6vw, 72px);
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;
+  }
+  @media (max-width: 860px) { .band { grid-template-columns: 1fr; } }
+  .band h2 { font-size: clamp(28px, 3.6vw, 40px); }
+  .band p { color: #075985; margin-top: 14px; font-size: 16px; }
+  .platforms { display: grid; gap: 12px; }
+  .platform {
+    background: rgba(255,255,255,0.75); border-radius: 18px;
+    padding: 16px 20px; display: flex; justify-content: space-between; align-items: baseline;
+    font-weight: 500; font-size: 15px;
+  }
+  .platform span { color: var(--soft); font-weight: 400; font-size: 13.5px; }
+
+  /* ---------- downloads ---------- */
+  .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 44px; }
+  @media (max-width: 860px) { .tiers { grid-template-columns: 1fr; } }
+  .tier {
+    border-radius: var(--r-card); padding: 36px 32px;
+    border: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .tier.emph { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .tier .os { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--soft); }
+  .tier.emph .os { color: #A1A1AA; }
+  .tier .name { font-family: "Inter Tight", sans-serif; font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
+  .tier p { font-size: 15px; color: var(--body); margin: 8px 0 22px; }
+  .tier.emph p { color: #D4D4D8; }
+  .tier .btn { align-self: flex-start; margin-top: auto; }
+  .fineprint { color: var(--soft); font-size: 13px; margin-top: 18px; }
+
+  /* ---------- faq ---------- */
+  .faq { max-width: 760px; margin: 44px auto 0; }
+  details { border-bottom: 1px solid var(--border); }
+  summary {
+    cursor: pointer; list-style: none;
+    display: flex; justify-content: space-between; align-items: center; gap: 16px;
+    padding: 22px 4px; font-weight: 500; font-size: 16.5px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-size: 22px; color: var(--soft); transition: transform 0.2s; }
+  details[open] summary::after { transform: rotate(45deg); }
+  details p { color: var(--body); font-size: 15px; padding: 0 4px 22px; max-width: 62ch; }
+
+  /* ---------- final cta ---------- */
+  .final.container { text-align: center; padding: 120px 24px 130px; }
+  .final h2 { font-size: clamp(34px, 5vw, 56px); margin: 0 auto; }
+  .final .icon { width: 84px; height: 84px; margin: 0 auto 28px; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--border); padding: 56px 0 40px; }
+  .foot-grid { display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
+  .foot-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .foot-brand img { width: 24px; height: 24px; }
+  .foot-cols { display: flex; gap: 72px; flex-wrap: wrap; }
+  .foot-col { display: grid; gap: 10px; font-size: 14px; align-content: start; }
+  .foot-col b { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--soft); font-weight: 600; margin-bottom: 4px; }
+  .foot-col a { color: var(--body); }
+  .foot-col a:hover { color: var(--ink); }
+  .foot-bottom {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin-top: 48px; color: var(--soft); font-size: 13.5px;
+  }
+  .status { display: inline-flex; align-items: center; gap: 8px; }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 99px; background: #22C55E; }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn:hover { transform: none; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#"><img src="assets/icon.svg" alt=""> iLabel Studio</a>
+    <div class="nav-links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#downloads">Downloads</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
+      <a class="btn btn-dark btn-sm" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="container">
+  <h1>Design, number, and print labels in one place</h1>
+  <p class="sub">iLabel Studio is a precision editor and printer for iLabel sheets from label.kr — plus custom sheets and roll labels. Rich text, merge data, serial numbering, and capture-based print runs, all in one project format.</p>
+  <div class="cta-row">
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
+    <a class="btn btn-light" href="#downloads">Windows &amp; Linux</a>
+  </div>
+  <p class="trust">Free download · macOS 14+, Windows x64, Linux x64</p>
+  <div class="hero-shot frame">
+    <img src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" alt="iLabel Studio label editor with canvas, page preview, numbering, and capture queue" loading="eager">
+  </div>
+</header>
+
+<div class="statement container">
+  <p>Not just a label maker.<br><span class="dim">A studio for everything you stick.</span></p>
+</div>
+
+<section id="features" class="container">
+  <span class="kicker">Editor</span>
+  <h2>Whatever's on your sheet, design it</h2>
+  <p class="lede">Pick a format, drop in text and images, and see exactly what each printed cell contains — before a single label leaves the tray.</p>
+  <div class="cards">
+    <div class="card">
+      <div class="glyph">🗂️</div>
+      <h3>1,006 sheet formats built in</h3>
+      <p>The full iLabel catalog ships with the app, alongside fully custom sheet geometry and roll labels. Active cells match the real label shape, circles included.</p>
+    </div>
+    <div class="card">
+      <div class="glyph">✏️</div>
+      <h3>Rich text, down to the character</h3>
+      <p>Fonts, embedded fonts, bold, italic, underline, strikethrough, super- and subscript, text and highlight colors — applied per selection and rendered identically in print.</p>
+    </div>
+    <div class="card">
+      <div class="glyph">📐</div>
+      <h3>Millimeter-accurate placement</h3>
+      <p>Frame spacing, alignment, and per-cell placement are set in real units, so what lands on paper is what you laid out on the canvas.</p>
+    </div>
+  </div>
+</section>
+
+<section class="container">
+  <span class="kicker">Data</span>
+  <div class="split">
+    <div>
+      <h2>Serials, merge data, and capture runs</h2>
+      <ul>
+        <li>Number labels with Start, End, Step, and Repeat — or generate one label per row of an imported CSV.</li>
+        <li>Merge tokens like <code>{{serial}}</code> fill in per label at print time.</li>
+        <li>Capture consecutive print runs into a queue, stage empty positions, and use every last label on a partially used sheet.</li>
+      </ul>
+    </div>
+    <div class="frame">
+      <img src="assets/capture-queue-workflow.gif" alt="Creating label content, adjusting quantities, and capturing multiple print runs" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<section class="container">
+  <div class="band">
+    <div>
+      <h2>Native on the Mac. Equal everywhere.</h2>
+      <p>iLabel Studio is a native SwiftUI app on macOS and a feature-equivalent desktop app on Windows and Linux. Every edition shares the same project format — rich text, embedded fonts, merge data, numbering, placement, and captured print queues travel with the file.</p>
+    </div>
+    <div class="platforms">
+      <div class="platform">macOS <span>Universal — Apple silicon &amp; Intel</span></div>
+      <div class="platform">Windows <span>NSIS installer &amp; portable</span></div>
+      <div class="platform">Linux <span>AppImage &amp; Debian package</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="downloads" class="container">
+  <span class="kicker">Downloads</span>
+  <h2>Free. No account, no trial clock.</h2>
+  <div class="tiers">
+    <div class="tier emph">
+      <span class="os">macOS 14+</span>
+      <span class="name">iLabel Studio for Mac</span>
+      <p>Download the DMG, drag iLabel Studio to Applications, and launch. Universal binary for Apple silicon and Intel.</p>
+      <a class="btn btn-white" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download DMG</a>
+    </div>
+    <div class="tier">
+      <span class="os">Windows &amp; Linux</span>
+      <span class="name">Desktop edition</span>
+      <p>Grab the latest packaged build from GitHub Actions: NSIS or portable EXE for Windows, AppImage or DEB for Linux.</p>
+      <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Get from Actions</a>
+    </div>
+  </div>
+  <p class="fineprint">Development Windows builds are unsigned, so SmartScreen may show a warning. The Linux AppImage ships inside a tar.gz so its executable permission survives download.</p>
+</section>
+
+<section id="faq" class="container">
+  <span class="kicker">FAQ</span>
+  <h2>Questions, answered</h2>
+  <div class="faq">
+    <details>
+      <summary>Which label sheets does it support?</summary>
+      <p>All 1,006 official iLabel formats from label.kr are built in, and you can define fully custom sheet geometry or roll labels when your stock isn't in the catalog.</p>
+    </details>
+    <details>
+      <summary>I was using iLabel2Mac. Do my projects still open?</summary>
+      <p>Yes. iLabel Studio is the same app renamed — quit the old iLabel2Mac, install iLabel Studio, and remove the old bundle. Existing projects and preferences remain compatible.</p>
+    </details>
+    <details>
+      <summary>Are projects portable between Mac, Windows, and Linux?</summary>
+      <p>Yes. Every edition shares one project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.</p>
+    </details>
+    <details>
+      <summary>How does printing on a partially used sheet work?</summary>
+      <p>Stage empty positions in Page Preview, then capture the run. The capture queue remembers which cells are gone, so the next run starts exactly where the last one ended.</p>
+    </details>
+    <details>
+      <summary>Does it cost anything?</summary>
+      <p>No. Download it from GitHub and print.</p>
+    </details>
+  </div>
+</section>
+
+<div class="final container">
+  <img class="icon" src="assets/icon.svg" alt="">
+  <h2>Make more of every sheet you print.</h2>
+  <div class="cta-row">
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <div class="foot-grid">
+      <div class="foot-brand"><img src="assets/icon.svg" alt=""> iLabel Studio</div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <b>Product</b>
+          <a href="#features">Features</a>
+          <a href="#downloads">Downloads</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <div class="foot-col">
+          <b>Resources</b>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio#readme">Documentation</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases">Releases</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/issues">Issues</a>
+        </div>
+        <div class="foot-col">
+          <b>Source</b>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Desktop builds</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <a class="status" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Packaged on every commit</a>
+      <span>© 2026 Jae-Yoon Sung</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
