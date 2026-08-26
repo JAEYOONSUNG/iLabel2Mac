@@ -1106,11 +1106,14 @@ struct TextFormattingToolbar: View {
         clearHelp: String,
         onClear: @escaping () -> Void
     ) -> some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 2) {
             Text(title)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(.secondary)
-            HStack(spacing: 2) {
+            // One chip per well, like the neighboring control groups — the
+            // shared background is what says the slash belongs to this color
+            // and not the next one over.
+            HStack(spacing: 3) {
                 ColorPicker(title, selection: selection, supportsOpacity: true)
                     .labelsHidden()
                     .frame(width: 28)
@@ -1118,13 +1121,20 @@ struct TextFormattingToolbar: View {
                 // *a* color, so removing one needs its own control.
                 Button(action: onClear) {
                     Image(systemName: "nosign")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
                 .help(clearHelp)
                 .accessibilityLabel(clearHelp)
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
         }
         .help(title)
     }
