@@ -1,5 +1,6 @@
 import { app, ipcMain, shell, type BrowserWindow } from "electron";
-import { get } from "node:https";
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -47,6 +48,9 @@ export function newerVersion(a: string, b: string): boolean {
 }
 
 function fetchFeed(url: string): Promise<Record<string, FeedEntry>> {
+  // Plain http never resolves for the default feed — it only exists so a test
+  // can point ILABEL_UPDATE_FEED at a local server.
+  const get = url.startsWith("http:") ? httpGet : httpsGet;
   return new Promise((resolve, reject) => {
     const request = get(url, { timeout: 8000 }, (response) => {
       if (response.statusCode !== 200) {
