@@ -145,6 +145,8 @@ async function checkForUpdate(window: BrowserWindow | null): Promise<void> {
 
 type UpdateResult = { status: "success" } | { status: "error"; error: { code: string; message: string } };
 
+let progressForwarderAttached = false;
+
 async function downloadUpdate(window: BrowserWindow | null): Promise<UpdateResult> {
   try {
     const { autoUpdater } = await import("electron-updater");
@@ -152,14 +154,18 @@ async function downloadUpdate(window: BrowserWindow | null): Promise<UpdateResul
     autoUpdater.autoInstallOnAppQuit = true; // consent was just given
     autoUpdater.logger = null;
     /* A hundred megabytes with nothing on screen reads as frozen — the banner
-       shows the percentage, and the dock or taskbar mirrors it. */
-    autoUpdater.on("download-progress", (progress) => {
-      const percent = Math.max(0, Math.round(progress?.percent || 0));
-      if (window && !window.isDestroyed()) {
-        window.setProgressBar(percent / 100);
-        window.webContents.send("update:progress", { percent });
-      }
-    });
+       shows the percentage, and the dock or taskbar mirrors it. Attached once:
+       a second download must not double every progress event. */
+    if (!progressForwarderAttached) {
+      progressForwarderAttached = true;
+      autoUpdater.on("download-progress", (progress) => {
+        const percent = Math.max(0, Math.round(progress?.percent || 0));
+        if (window && !window.isDestroyed()) {
+          window.setProgressBar(percent / 100);
+          window.webContents.send("update:progress", { percent });
+        }
+      });
+    }
     const downloaded = new Promise<void>((resolve, reject) => {
       autoUpdater.once("update-downloaded", () => resolve());
       autoUpdater.once("error", (error) => reject(error));
@@ -179,7 +185,10 @@ async function downloadUpdate(window: BrowserWindow | null): Promise<UpdateResul
 }
 
 export function registerUpdateIPC(getWindow: () => BrowserWindow | null): void {
-  ipcMain.handle("update:state", () => offer);
+  // A reloaded renderer asks for the standing offer; one the person already
+  // skipped must not come back through that side door.
+  ipcMain.handle("update:state", async () =>
+    offer && offer.version !== (await readSkippedVersion()) ? offer : null);
   ipcMain.handle("update:download", () => downloadUpdate(getWindow()));
   ipcMain.handle("update:install", async () => {
     const { autoUpdater } = await import("electron-updater");

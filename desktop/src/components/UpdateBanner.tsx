@@ -21,7 +21,13 @@ export default function UpdateBanner() {
     void updates.state().then((existing) => {
       if (!cancelled && existing) setOffer(existing);
     });
-    const offAvailable = updates.onAvailable((next) => setOffer(next));
+    const offAvailable = updates.onAvailable((next) => {
+      // A fresh offer restarts the conversation — phase state from an older
+      // version's download must not leak into it.
+      setOffer(next);
+      setPhase("offer");
+      setDismissed(false);
+    });
     const offProgress = updates.onProgress((progress) => setPercent(progress?.percent ?? 0));
     return () => {
       cancelled = true;
