@@ -85,6 +85,14 @@ jobs:
           test -f "$asar_path"
           node -e '
             const asar = require("@electron/asar");
+            const entries = asar.listPackage(process.argv[1]).map(String);
+            const top = new Set(entries
+              .map((entry) => entry.replace(/\\/g, "/"))
+              .filter((entry) => /^\/?node_modules\/[^/]+\/?$/.test(entry)));
+            console.log(`asar node_modules top-level (${top.size}):`, [...top].join(", "));
+          ' "$asar_path"
+          node -e '
+            const asar = require("@electron/asar");
             for (const file of ["dist/index.html", "dist-electron/main.js", "dist-electron/preload.js", "dist-electron/updater.js", "node_modules/electron-updater/package.json"]) {
               if (asar.extractFile(process.argv[1], file).length === 0) {
                 throw new Error(`Empty packaged file: ${file}`);
