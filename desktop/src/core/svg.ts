@@ -1108,6 +1108,37 @@ function circularTextLines(
   });
 }
 
+function renderLineHighlights(
+  line: TextLine,
+  rich: ResolvedRichText,
+  element: LabelElement,
+): string {
+  const end = line.start + line.length;
+  const anchor = textAnchor(element.textAlignment);
+  const lineWidth = measureRichRange(rich, line.start, end, element);
+  const leftEdge =
+    anchor === "middle" ? line.x - lineWidth / 2 : anchor === "end" ? line.x - lineWidth : line.x;
+  const rects: string[] = [];
+  for (const run of rich.runs) {
+    const start = Math.max(line.start, run.start);
+    const segmentEnd = Math.min(end, run.start + run.length);
+    if (segmentEnd <= start) continue;
+    const background = run.background;
+    if (!background || colorAlpha(background) <= 0.001) continue;
+    const x = leftEdge + measureRichRange(rich, line.start, start, element);
+    const width = measureRichRange(rich, start, segmentEnd, element);
+    if (width <= 0) continue;
+    const size = runFontSizeMM(run, element);
+    const opacity = colorAlpha(background) < 1
+      ? ` fill-opacity="${number(colorAlpha(background))}"`
+      : "";
+    rects.push(
+      `<rect x="${number(x)}" y="${number(line.baselineY - size * 0.85)}" width="${number(width)}" height="${number(size * 1.1)}" fill="${colorHex(background)}"${opacity}/>`,
+    );
+  }
+  return rects.join("");
+}
+
 function renderRichLine(
   line: TextLine,
   rich: ResolvedRichText,
@@ -1189,6 +1220,12 @@ function renderTextElement(
   const tspans = lines
     .map((line) => renderRichLine(line, rich, element, environment.embeddedFonts))
     .join("");
+  const highlightRects = lines
+    .map((line) => renderLineHighlights(line, rich, element))
+    .join("");
+  const highlights = highlightRects
+    ? `<g data-role="text-highlights" clip-path="url(#${clipID})">${highlightRects}</g>`
+    : "";
   const layout = circular ? "circular-chord" : element.verticalTextLayout ? "vertical" : "rectangular";
   const fontFamily = resolvedFontFamily(
     element.fontName,
@@ -1202,7 +1239,7 @@ function renderTextElement(
     definitions: [
       `<clipPath id="${clipID}" clipPathUnits="userSpaceOnUse">${clipShape}</clipPath>`,
     ],
-    body: elementGroup(element, "text", `${surface}${text}`),
+    body: elementGroup(element, "text", `${surface}${highlights}${text}`),
   };
 }
 

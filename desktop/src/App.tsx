@@ -849,6 +849,9 @@ function Inspector({
   const [wifiExpanded, setWiFiExpanded] = useState(
     () => localStorage.getItem("ilabel2.inspector.wifiExpanded") === "true",
   );
+  const [highlightColor, setHighlightColor] = useState<RGBAColor>(
+    { red: 1, green: 0.84, blue: 0.2, alpha: 0 },
+  );
 
   useEffect(() => {
     localStorage.setItem("ilabel2.inspector.notesExpanded", String(notesExpanded));
@@ -1088,6 +1091,12 @@ function Inspector({
                 <ColorField label={selected.type === "text" ? "Text color" : "Foreground"} value={selected.foreground} onChange={(value) => selected.type === "text"
                   ? onTextStyleAction({ kind: "foreground", value })
                   : onUpdateSelected((element) => { element.foreground = value; }, "foreground")} />
+                {selected.type === "text" && (
+                  <ColorField label="Highlight" value={highlightColor} onChange={(value) => {
+                    setHighlightColor(value);
+                    onTextStyleAction({ kind: "highlight", value: value.alpha > 0 ? value : undefined });
+                  }} />
+                )}
                 <ColorField label="Background" value={selected.background} onChange={(value) => onUpdateSelected((element) => { element.background = value; }, "background")} />
                 <ColorField label="Stroke" value={selected.stroke} onChange={(value) => onUpdateSelected((element) => { element.stroke = value; }, "stroke")} />
                 <div className="field-grid">
@@ -1148,6 +1157,7 @@ interface LabelEditorProps {
   onFrameChange: (id: string, frame: LabelElement["frame"]) => void;
   onRichTextChange: (id: string, content: string, richTextRTF: string | undefined) => void;
   onActivateRichEditor: (editor: RichTextEditorHandle) => void;
+  onActivateText: () => Promise<string | undefined>;
 }
 
 function LabelEditor({
@@ -1157,6 +1167,7 @@ function LabelEditor({
   onFrameChange,
   onRichTextChange,
   onActivateRichEditor,
+  onActivateText,
 }: LabelEditorProps) {
   const { ref: stageRef, size: stageSize } = useElementSize<HTMLDivElement>();
   const [editingID, setEditingID] = useState<string>();
@@ -1263,7 +1274,20 @@ function LabelEditor({
   }, [editingElement, svg]);
 
   return (
-    <div className="label-editor-stage" ref={stageRef} onPointerDown={() => setEditingID(undefined)}>
+    <div
+      className="label-editor-stage"
+      ref={stageRef}
+      onPointerDown={() => {
+        // Click the label and type: a click on empty space while editing puts
+        // the pen down; otherwise it picks up a text element (creating one on
+        // an empty label) and starts typing there — same as the macOS edition.
+        if (editingID) {
+          setEditingID(undefined);
+          return;
+        }
+        void onActivateText().then((id) => { if (id) setEditingID(id); });
+      }}
+    >
       <div
         className="label-board"
         data-width={formatMM(document.sheet.labelWidthMM)}
@@ -1476,6 +1500,7 @@ interface EditorProps extends NumberingQueueProps {
   onFrameChange: LabelEditorProps["onFrameChange"];
   onRichTextChange: LabelEditorProps["onRichTextChange"];
   onActivateRichEditor: LabelEditorProps["onActivateRichEditor"];
+  onActivateText: LabelEditorProps["onActivateText"];
   onSelectSlot: (slotIndex: number) => void;
   onSelectSlotRange: (startSlot: number, endSlot: number) => void;
   onResetArea: () => void;
@@ -1495,6 +1520,7 @@ function Editor({
   onFrameChange,
   onRichTextChange,
   onActivateRichEditor,
+  onActivateText,
   onSelectSlot,
   onSelectSlotRange,
   onResetArea,
@@ -1550,6 +1576,7 @@ function Editor({
               onFrameChange={onFrameChange}
               onRichTextChange={onRichTextChange}
               onActivateRichEditor={onActivateRichEditor}
+              onActivateText={onActivateText}
             />
             <div className="preview-column">
               <div className="preview-pane">
@@ -2062,10 +2089,26 @@ function App() {
       }
       mutateDocument((draft) => { draft.elements.push(element); }, undefined, `Added ${elementTypeLabel(type)}`);
       setSelectedID(element.id);
+      return element.id;
     } catch (error) {
       setStatus(`Image import failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }, [mutateDocument]);
+
+  /* "Click the label and type", same as the macOS edition: focus the selected
+     text element, else the first one, else create one — so a first click on
+     the empty label always lands somewhere typing works. */
+  const activatePrimaryText = useCallback(async (): Promise<string | undefined> => {
+    const current = documentRef.current;
+    const chosen = current.elements.find((el) => el.id === selectedID && el.type === "text")
+      ?? current.elements.find((el) => el.type === "text");
+    if (chosen) {
+      setSelectedID(chosen.id);
+      return chosen.id;
+    }
+    return addElement("text");
+  }, [selectedID, addElement]);
 
   const selected = document.elements.find((element) => element.id === selectedID);
   const hasQueuedCaptures = (document.printQueue?.length ?? 0) > 0;
@@ -2190,6 +2233,12 @@ function App() {
         case "foreground":
           element.foreground = { ...action.value };
           runs.forEach((run) => { run.foreground = { ...action.value }; });
+          break;
+        case "highlight":
+          runs.forEach((run) => {
+            if (action.value) run.background = { ...action.value };
+            else delete run.background;
+          });
           break;
       }
       element.richTextRTF = element.content.length > 0
@@ -2663,6 +2712,7 @@ function App() {
           }}
           onRichTextChange={updateRichText}
           onActivateRichEditor={(editor) => { activeRichEditor.current = editor; }}
+          onActivateText={activatePrimaryText}
           onSelectSlot={selectSlot}
           onSelectSlotRange={selectSlotRange}
           onResetArea={resetPlacementArea}

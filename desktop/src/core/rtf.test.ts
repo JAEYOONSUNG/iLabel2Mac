@@ -195,7 +195,7 @@ describe("RTF serialization", () => {
     expect(serialized).toContain("\\line ");
     expect(serialized).toContain("\\{x\\}\\\\");
     expect(serialized.match(/\\f\d+\\fnil/g)).toHaveLength(2);
-    expect(serialized.match(/\\red\d+/g)).toHaveLength(3);
+    expect(serialized.match(/\\red\d+/g)).toHaveLength(4); // reserved white + 3 colors
     expect(reparsed.text).toBe(text);
     expect(reparsed.runs).toHaveLength(3);
     expect(reparsed.runs[0]).toMatchObject({
@@ -235,7 +235,7 @@ describe("RTF serialization", () => {
     ]);
 
     expect(rtf.match(/\\f\d+\\fnil/g)).toHaveLength(2);
-    expect(rtf.match(/\\red\d+/g)).toHaveLength(2);
+    expect(rtf.match(/\\red\d+/g)).toHaveLength(3); // reserved white + 2 colors
     expect(parseRTF(rtf).text).toBe("ABCD");
   });
 
@@ -260,5 +260,45 @@ describe("RTF serialization", () => {
       fontName: "나눔고딕",
       bold: true,
     });
+  });
+});
+
+describe("RTF background colors", () => {
+  it("round-trips a selection highlight through serialize and parse", () => {
+    const yellow = { red: 1, green: 0.84, blue: 0.2, alpha: 1 };
+    const rtf = serializeRTF("AB", [
+      { start: 0, length: 1, bold: false, italic: false, underline: false },
+      { start: 1, length: 1, bold: false, italic: false, underline: false, background: yellow },
+    ]);
+    expect(rtf).toContain("\\cb2");
+    const parsed = parseRTF(rtf);
+    expect(parsed.isValid).toBe(true);
+    expect(parsed.runs.find((run) => run.start === 0)?.background).toBeUndefined();
+    const highlighted = parsed.runs.find((run) => run.start === 1)?.background;
+    expect(highlighted?.red).toBeCloseTo(1, 2);
+    expect(highlighted?.green).toBeCloseTo(0.84, 2);
+  });
+
+  it("reads Cocoa's \\cb runs and treats its white slot 1 as no highlight", () => {
+    const cocoa = "{\\rtf1\\ansi\\ansicpg949\\cocoartf2870\n" +
+      "{\\fonttbl\\f0\\fswiss\\fcharset0 Helvetica;}\n" +
+      "{\\colortbl;\\red255\\green255\\blue255;\\red255\\green255\\blue11;}\n" +
+      "\\pard\\pardirnatural\\partightenfactor0\n" +
+      "\\f0\\fs24 \\cf0 \\cb2 A\\cb1 B}";
+    const parsed = parseRTF(cocoa);
+    expect(parsed.isValid).toBe(true);
+    expect(parsed.text).toBe("AB");
+    const first = parsed.runs.find((run) => run.start === 0);
+    const second = parsed.runs.find((run) => run.start === 1);
+    expect(first?.background?.blue).toBeCloseTo(11 / 255, 2);
+    expect(second?.background).toBeUndefined();
+  });
+
+  it("reads Word's \\highlight and its zero as removal", () => {
+    const word = "{\\rtf1\\ansi{\\colortbl;\\red255\\green255\\blue0;}\\highlight1 A\\highlight0 B}";
+    const parsed = parseRTF(word);
+    expect(parsed.isValid).toBe(true);
+    expect(parsed.runs.find((run) => run.start === 0)?.background?.green).toBeCloseTo(1, 2);
+    expect(parsed.runs.find((run) => run.start === 1)?.background).toBeUndefined();
   });
 });
