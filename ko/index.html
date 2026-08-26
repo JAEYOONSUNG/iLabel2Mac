@@ -1,21 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>iLabel Studio — Design, number, and print labels in one place</title>
-<meta name="description" content="iLabel Studio is a precision label editor and printer for iLabel sheets, custom sheets, and roll labels. Native on macOS, feature-equivalent on Windows and Linux.">
+<title>iLabel Studio — 라벨 디자인부터 인쇄까지, 한곳에서</title>
+<meta name="description" content="iLabel Studio는 label.kr iLabel 전지를 위한 정밀 라벨 편집·인쇄 앱입니다. 커스텀 시트와 롤 라벨을 지원하며 macOS 네이티브, Windows·Linux 동등 기능으로 제공됩니다.">
 <meta property="og:title" content="iLabel Studio">
-<meta property="og:description" content="Design, number, and print labels in one place. Free for macOS, Windows, and Linux.">
+<meta property="og:description" content="라벨 디자인부터 인쇄까지, 한곳에서. macOS·Windows·Linux 무료.">
 <meta property="og:image" content="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587">
+<meta property="og:locale" content="ko_KR">
 <link rel="alternate" hreflang="en" href="https://jaeyoonsung.github.io/iLabel-Studio/">
 <link rel="alternate" hreflang="ko" href="https://jaeyoonsung.github.io/iLabel-Studio/ko/">
-<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=Inter:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap">
 <style>
   :root {
     --ink: #18181B;
@@ -32,20 +33,21 @@
   body {
     background: #fff;
     color: var(--ink);
-    font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif;
+    font-family: "Inter", "Noto Sans KR", -apple-system, "Apple SD Gothic Neo", sans-serif;
     font-size: 16px;
-    line-height: 1.6;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    word-break: keep-all;
   }
   img { max-width: 100%; display: block; }
   a { color: inherit; text-decoration: none; }
   .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
   h1, h2, h3, .display {
-    font-family: "Inter Tight", "Inter", sans-serif;
-    font-weight: 500;
-    letter-spacing: -0.03em;
-    line-height: 1.08;
+    font-family: "Inter Tight", "Noto Sans KR", sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.14;
     text-wrap: balance;
   }
 
@@ -86,12 +88,12 @@
   /* ---------- hero ---------- */
   header.container { padding: 160px 24px 0; text-align: center; }
   header h1 {
-    font-size: clamp(42px, 6.4vw, 74px);
-    max-width: 15ch; margin: 0 auto;
+    font-size: clamp(38px, 5.8vw, 66px);
+    max-width: 16ch; margin: 0 auto;
   }
   header .sub {
-    color: var(--soft); font-size: clamp(17px, 2vw, 20px);
-    max-width: 52ch; margin: 24px auto 0;
+    color: var(--soft); font-size: clamp(16px, 2vw, 19px);
+    max-width: 44ch; margin: 24px auto 0;
   }
   .cta-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
   .trust { color: var(--soft); font-size: 13.5px; margin-top: 16px; }
@@ -107,10 +109,10 @@
   /* ---------- big statement ---------- */
   .statement.container { padding: 140px 24px 40px; text-align: center; }
   .statement p {
-    font-family: "Inter Tight", sans-serif; font-weight: 500;
-    letter-spacing: -0.03em; line-height: 1.15;
-    font-size: clamp(30px, 4.6vw, 52px);
-    max-width: 22ch; margin: 0 auto; text-wrap: balance;
+    font-family: "Inter Tight", "Noto Sans KR", sans-serif; font-weight: 700;
+    letter-spacing: -0.035em; line-height: 1.2;
+    font-size: clamp(28px, 4.2vw, 48px);
+    max-width: 24ch; margin: 0 auto; text-wrap: balance;
   }
   .statement .dim { color: #A1A1AA; }
 
@@ -123,8 +125,8 @@
     font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
     margin-bottom: 20px;
   }
-  section h2 { font-size: clamp(30px, 4vw, 44px); max-width: 20ch; }
-  section .lede { color: var(--soft); font-size: 17px; max-width: 56ch; margin-top: 16px; }
+  section h2 { font-size: clamp(28px, 3.8vw, 42px); max-width: 22ch; }
+  section .lede { color: var(--soft); font-size: 17px; max-width: 46ch; margin-top: 16px; }
 
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 44px; }
   @media (max-width: 860px) { .cards { grid-template-columns: 1fr; } }
@@ -154,7 +156,7 @@
     display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;
   }
   @media (max-width: 860px) { .band { grid-template-columns: 1fr; } }
-  .band h2 { font-size: clamp(28px, 3.6vw, 40px); }
+  .band h2 { font-size: clamp(26px, 3.4vw, 38px); }
   .band p { color: #075985; margin-top: 14px; font-size: 16px; }
   .platforms { display: grid; gap: 12px; }
   .platform {
@@ -175,7 +177,7 @@
   .tier.emph { background: var(--ink); color: #fff; border-color: var(--ink); }
   .tier .os { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--soft); }
   .tier.emph .os { color: #A1A1AA; }
-  .tier .name { font-family: "Inter Tight", sans-serif; font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
+  .tier .name { font-family: "Inter Tight", "Noto Sans KR", sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
   .tier p { font-size: 15px; color: var(--body); margin: 8px 0 22px; }
   .tier.emph p { color: #D4D4D8; }
   .tier .btn { align-self: flex-start; margin-top: auto; }
@@ -196,7 +198,7 @@
 
   /* ---------- final cta ---------- */
   .final.container { text-align: center; padding: 120px 24px 130px; }
-  .final h2 { font-size: clamp(34px, 5vw, 56px); margin: 0 auto; }
+  .final h2 { font-size: clamp(30px, 4.6vw, 52px); margin: 0 auto; }
   .final .icon { width: 84px; height: 84px; margin: 0 auto 28px; }
 
   /* ---------- footer ---------- */
@@ -224,71 +226,71 @@
 
 <nav>
   <div class="container nav-inner">
-    <a class="brand" href="#"><img src="assets/icon.svg" alt=""> iLabel Studio</a>
+    <a class="brand" href="#"><img src="../assets/icon.svg" alt=""> iLabel Studio</a>
     <div class="nav-links">
-      <a class="hide-sm" href="#features">Features</a>
-      <a class="hide-sm" href="#downloads">Downloads</a>
+      <a class="hide-sm" href="#features">기능</a>
+      <a class="hide-sm" href="#downloads">다운로드</a>
       <a class="hide-sm" href="#faq">FAQ</a>
       <a href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
-      <a class="btn btn-light btn-sm" href="ko/" lang="ko" title="한국어로 보기">🇰🇷 한국어</a>
-      <a class="btn btn-dark btn-sm" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download</a>
+      <a class="btn btn-light btn-sm" href="../" lang="en" title="View in English">🇺🇸 English</a>
+      <a class="btn btn-dark btn-sm" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">다운로드</a>
     </div>
   </div>
 </nav>
 
 <header class="container">
-  <h1>Design, number, and print labels in one place</h1>
-  <p class="sub">iLabel Studio is a precision editor and printer for iLabel sheets from label.kr — plus custom sheets and roll labels. Rich text, merge data, serial numbering, and capture-based print runs, all in one project format.</p>
+  <h1>라벨 디자인부터 인쇄까지, 한곳에서</h1>
+  <p class="sub">iLabel Studio는 label.kr iLabel 전지를 위한 정밀 라벨 편집·인쇄 앱입니다. 커스텀 시트와 롤 라벨까지 지원하고, 리치 텍스트·머지 데이터·일련번호·캡처 인쇄 대기열을 하나의 프로젝트 포맷에 담습니다.</p>
   <div class="cta-row">
-    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">macOS용 다운로드</a>
     <a class="btn btn-light" href="#downloads">Windows &amp; Linux</a>
   </div>
-  <p class="trust">Free download · macOS 14+, Windows x64, Linux x64</p>
+  <p class="trust">무료 다운로드 · macOS 14+, Windows x64, Linux x64</p>
   <div class="hero-shot frame">
-    <img src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" alt="iLabel Studio label editor with canvas, page preview, numbering, and capture queue" loading="eager">
+    <img src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" alt="캔버스, 페이지 미리보기, 넘버링, 캡처 대기열이 있는 iLabel Studio 라벨 에디터" loading="eager">
   </div>
 </header>
 
 <div class="statement container">
-  <p>Not just a label maker.<br><span class="dim">A studio for everything you stick.</span></p>
+  <p>그냥 라벨 메이커가 아닙니다.<br><span class="dim">붙이는 모든 것을 위한 스튜디오.</span></p>
 </div>
 
 <section id="features" class="container">
-  <span class="kicker">Editor</span>
-  <h2>Whatever's on your sheet, design it</h2>
-  <p class="lede">Pick a format, drop in text and images, and see exactly what each printed cell contains — before a single label leaves the tray.</p>
+  <span class="kicker">에디터</span>
+  <h2>시트 위에 올릴 것, 무엇이든 디자인하세요</h2>
+  <p class="lede">포맷을 고르고 텍스트와 이미지를 얹으면, 라벨 한 장이 트레이를 떠나기 전에 각 칸에 정확히 무엇이 인쇄될지 미리 확인할 수 있습니다.</p>
   <div class="cards">
     <div class="card">
       <div class="glyph">🗂️</div>
-      <h3>1,006 sheet formats built in</h3>
-      <p>The full iLabel catalog ships with the app, alongside fully custom sheet geometry and roll labels. Active cells match the real label shape, circles included.</p>
+      <h3>1,006가지 시트 포맷 내장</h3>
+      <p>iLabel 공식 카탈로그 전체가 앱에 들어 있습니다. 카탈로그에 없는 용지는 커스텀 시트나 롤 라벨로 직접 정의할 수 있고, 원형 라벨은 활성 칸도 실제 모양 그대로 표시됩니다.</p>
     </div>
     <div class="card">
       <div class="glyph">✏️</div>
-      <h3>Rich text, down to the character</h3>
-      <p>Fonts, embedded fonts, bold, italic, underline, strikethrough, super- and subscript, text and highlight colors — applied per selection and rendered identically in print.</p>
+      <h3>글자 단위 리치 텍스트</h3>
+      <p>폰트, 폰트 임베딩, 굵게·기울임·밑줄·취소선, 위·아래 첨자, 글자색과 하이라이트까지 — 선택 범위 단위로 적용되고 인쇄에도 동일하게 렌더링됩니다.</p>
     </div>
     <div class="card">
       <div class="glyph">📐</div>
-      <h3>Millimeter-accurate placement</h3>
-      <p>Frame spacing, alignment, and per-cell placement are set in real units, so what lands on paper is what you laid out on the canvas.</p>
+      <h3>밀리미터 단위 정밀 배치</h3>
+      <p>프레임 간격, 정렬, 칸별 배치를 실제 단위(mm)로 지정합니다. 캔버스에서 잡은 레이아웃이 종이 위에 그대로 내려앉습니다.</p>
     </div>
   </div>
 </section>
 
 <section class="container">
-  <span class="kicker">Data</span>
+  <span class="kicker">데이터</span>
   <div class="split">
     <div>
-      <h2>Serials, merge data, and capture runs</h2>
+      <h2>일련번호, 머지 데이터, 캡처 인쇄</h2>
       <ul>
-        <li>Number labels with Start, End, Step, and Repeat — or generate one label per row of an imported CSV.</li>
-        <li>Merge tokens like <code>{{serial}}</code> fill in per label at print time.</li>
-        <li>Capture consecutive print runs into a queue, stage empty positions, and use every last label on a partially used sheet.</li>
+        <li>Start · End · Step · Repeat로 번호를 매기거나, CSV를 불러와 행마다 라벨 하나씩 생성합니다.</li>
+        <li><code>{{serial}}</code> 같은 머지 토큰이 인쇄 시점에 라벨별로 채워집니다.</li>
+        <li>연속 인쇄를 대기열로 캡처하고 빈 칸을 지정해, 쓰다 만 시트의 마지막 한 칸까지 사용합니다.</li>
       </ul>
     </div>
     <div class="frame">
-      <img src="assets/capture-queue-workflow.gif" alt="Creating label content, adjusting quantities, and capturing multiple print runs" loading="lazy">
+      <img src="../assets/capture-queue-workflow.gif" alt="라벨 내용을 만들고 수량을 조정한 뒤 여러 인쇄 회차를 캡처하는 과정" loading="lazy">
     </div>
   </div>
 </section>
@@ -296,99 +298,99 @@
 <section class="container">
   <div class="band">
     <div>
-      <h2>Native on the Mac. Equal everywhere.</h2>
-      <p>iLabel Studio is a native SwiftUI app on macOS and a feature-equivalent desktop app on Windows and Linux. Every edition shares the same project format — rich text, embedded fonts, merge data, numbering, placement, and captured print queues travel with the file.</p>
+      <h2>Mac에선 네이티브로. 어디서나 동일하게.</h2>
+      <p>iLabel Studio는 macOS에서 네이티브 SwiftUI 앱으로, Windows와 Linux에서는 동등한 기능의 데스크톱 앱으로 실행됩니다. 모든 에디션이 같은 프로젝트 포맷을 공유해 리치 텍스트, 임베딩된 폰트, 머지 데이터, 넘버링, 배치, 캡처된 인쇄 대기열이 파일과 함께 이동합니다.</p>
     </div>
     <div class="platforms">
-      <div class="platform">macOS <span>Universal — Apple silicon &amp; Intel</span></div>
-      <div class="platform">Windows <span>NSIS installer &amp; portable</span></div>
-      <div class="platform">Linux <span>AppImage &amp; Debian package</span></div>
+      <div class="platform">macOS <span>유니버설 — Apple silicon &amp; Intel</span></div>
+      <div class="platform">Windows <span>NSIS 설치본 &amp; 포터블</span></div>
+      <div class="platform">Linux <span>AppImage &amp; Debian 패키지</span></div>
     </div>
   </div>
 </section>
 
 <section id="downloads" class="container">
-  <span class="kicker">Downloads</span>
-  <h2>Free. No account, no trial clock.</h2>
+  <span class="kicker">다운로드</span>
+  <h2>무료입니다. 계정도, 체험판 시계도 없습니다.</h2>
   <div class="tiers">
     <div class="tier emph">
       <span class="os">macOS 14+</span>
-      <span class="name">iLabel Studio for Mac</span>
-      <p>Download the DMG, drag iLabel Studio to Applications, and launch. Universal binary for Apple silicon and Intel.</p>
-      <a class="btn btn-white" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download DMG</a>
+      <span class="name">Mac용 iLabel Studio</span>
+      <p>DMG를 내려받아 iLabel Studio를 Applications에 드래그하면 끝. Apple silicon과 Intel을 모두 지원하는 유니버설 바이너리입니다.</p>
+      <a class="btn btn-white" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">DMG 다운로드</a>
     </div>
     <div class="tier">
       <span class="os">Windows &amp; Linux</span>
-      <span class="name">Desktop edition</span>
-      <p>Grab the latest packaged build from GitHub Actions: NSIS or portable EXE for Windows, AppImage or DEB for Linux.</p>
-      <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Get from Actions</a>
+      <span class="name">데스크톱 에디션</span>
+      <p>GitHub Actions에서 최신 패키지 빌드를 받으세요. Windows는 NSIS 설치본 또는 포터블 EXE, Linux는 AppImage 또는 DEB입니다.</p>
+      <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Actions에서 받기</a>
     </div>
   </div>
-  <p class="fineprint">Development Windows builds are unsigned, so SmartScreen may show a warning. The Linux AppImage ships inside a tar.gz so its executable permission survives download.</p>
+  <p class="fineprint">개발용 Windows 빌드는 서명되어 있지 않아 SmartScreen 경고가 표시될 수 있습니다. Linux AppImage는 실행 권한이 다운로드 후에도 유지되도록 tar.gz로 포장되어 있습니다.</p>
 </section>
 
 <section id="faq" class="container">
   <span class="kicker">FAQ</span>
-  <h2>Questions, answered</h2>
+  <h2>자주 묻는 질문</h2>
   <div class="faq">
     <details>
-      <summary>Which label sheets does it support?</summary>
-      <p>All 1,006 official iLabel formats from label.kr are built in, and you can define fully custom sheet geometry or roll labels when your stock isn't in the catalog.</p>
+      <summary>어떤 라벨 전지를 지원하나요?</summary>
+      <p>label.kr의 iLabel 공식 포맷 1,006종이 모두 내장되어 있고, 카탈로그에 없는 용지는 시트 지오메트리를 직접 정의하거나 롤 라벨로 설정할 수 있습니다.</p>
     </details>
     <details>
-      <summary>I was using iLabel2Mac. Do my projects still open?</summary>
-      <p>Yes. iLabel Studio is the same app renamed — quit the old iLabel2Mac, install iLabel Studio, and remove the old bundle. Existing projects and preferences remain compatible.</p>
+      <summary>iLabel2Mac을 쓰고 있었는데, 프로젝트가 계속 열리나요?</summary>
+      <p>네. iLabel Studio는 같은 앱의 새 이름입니다. 기존 iLabel2Mac을 종료하고 iLabel Studio를 설치한 뒤 옛 앱을 제거하면 됩니다. 기존 프로젝트와 앱 설정은 그대로 호환됩니다.</p>
     </details>
     <details>
-      <summary>Are projects portable between Mac, Windows, and Linux?</summary>
-      <p>Yes. Every edition shares one project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.</p>
+      <summary>Mac, Windows, Linux 사이에서 프로젝트가 호환되나요?</summary>
+      <p>네. 모든 에디션이 하나의 프로젝트 포맷을 공유합니다. 리치 텍스트, 임베딩된 폰트, 머지 데이터, 넘버링, 배치, 캡처된 인쇄 대기열까지 전부 포함됩니다.</p>
     </details>
     <details>
-      <summary>How does printing on a partially used sheet work?</summary>
-      <p>Stage empty positions in Page Preview, then capture the run. The capture queue remembers which cells are gone, so the next run starts exactly where the last one ended.</p>
+      <summary>쓰다 만 시트에는 어떻게 인쇄하나요?</summary>
+      <p>페이지 미리보기에서 빈 칸을 지정한 뒤 인쇄 회차를 캡처하세요. 캡처 대기열이 이미 사용한 칸을 기억하고 있어, 다음 회차는 정확히 이어지는 위치에서 시작됩니다.</p>
     </details>
     <details>
-      <summary>Does it cost anything?</summary>
-      <p>No. Download it from GitHub and print.</p>
+      <summary>비용이 있나요?</summary>
+      <p>아니요. GitHub에서 내려받아 바로 인쇄하세요.</p>
     </details>
   </div>
 </section>
 
 <div class="final container">
-  <img class="icon" src="assets/icon.svg" alt="">
-  <h2>Make more of every sheet you print.</h2>
+  <img class="icon" src="../assets/icon.svg" alt="">
+  <h2>모든 시트를 마지막 칸까지.</h2>
   <div class="cta-row">
-    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">macOS용 다운로드</a>
   </div>
 </div>
 
 <footer>
   <div class="container">
     <div class="foot-grid">
-      <div class="foot-brand"><img src="assets/icon.svg" alt=""> iLabel Studio</div>
+      <div class="foot-brand"><img src="../assets/icon.svg" alt=""> iLabel Studio</div>
       <div class="foot-cols">
         <div class="foot-col">
-          <b>Product</b>
-          <a href="#features">Features</a>
-          <a href="#downloads">Downloads</a>
+          <b>제품</b>
+          <a href="#features">기능</a>
+          <a href="#downloads">다운로드</a>
           <a href="#faq">FAQ</a>
         </div>
         <div class="foot-col">
-          <b>Resources</b>
-          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio#readme">Documentation</a>
-          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases">Releases</a>
-          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/issues">Issues</a>
+          <b>자료</b>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio#readme">문서</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases">릴리스</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/issues">이슈</a>
         </div>
         <div class="foot-col">
-          <b>Source</b>
+          <b>소스</b>
           <a href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
-          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Desktop builds</a>
-          <a href="ko/" lang="ko">한국어</a>
+          <a href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">데스크톱 빌드</a>
+          <a href="../" lang="en">English</a>
         </div>
       </div>
     </div>
     <div class="foot-bottom">
-      <a class="status" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Packaged on every commit</a>
+      <a class="status" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">커밋마다 패키징</a>
       <span>© 2026 Jae-Yoon Sung</span>
     </div>
   </div>
