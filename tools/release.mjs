@@ -79,9 +79,13 @@ else {
 
 step("Version, tag, push");
 if (dry) { say(`(dry) would tag ${tag} and push`); process.exit(0); }
-runLoud("npm", ["version", "--no-git-tag-version", version], { cwd: join(repo, "desktop") });
-runLoud("git", ["add", "desktop/package.json", "desktop/package-lock.json"]);
-runLoud("git", ["commit", "-m", `Release ${tag}`]);
+if (version !== current) {
+  runLoud("npm", ["version", "--no-git-tag-version", version], { cwd: join(repo, "desktop") });
+  runLoud("git", ["add", "desktop/package.json", "desktop/package-lock.json"]);
+  runLoud("git", ["commit", "-m", `Release ${tag}`]);
+} else {
+  say(`   desktop/package.json already says ${version} — retrying the tag`);
+}
 runLoud("git", ["tag", tag]);
 runLoud("git", ["push", "origin", "main", tag]);
 

@@ -105,17 +105,20 @@ final class UpdateChecker: ObservableObject {
         guard let offer, phase == .offer || phase.isFailure else { return }
         phase = .downloading(nil)
         let bundleURL = Bundle.main.bundleURL
-        Task.detached(priority: .userInitiated) { [weak self] in
+        // The checker is a process-lifetime singleton, so the detached work
+        // reports back through it by name — capturing `self` weakly here trips
+        // Swift 6's Sendable checking for no benefit.
+        Task.detached(priority: .userInitiated) {
             do {
                 try await Self.performInstall(offer: offer, bundleURL: bundleURL) { fraction in
-                    Task { @MainActor [weak self] in self?.phase = .downloading(fraction) }
+                    Task { @MainActor in UpdateChecker.shared.phase = .downloading(fraction) }
                 } installing: {
-                    Task { @MainActor [weak self] in self?.phase = .installing }
+                    Task { @MainActor in UpdateChecker.shared.phase = .installing }
                 }
                 await MainActor.run { Self.relaunch(bundleURL) }
             } catch {
                 let message = (error as? InstallError)?.message ?? error.localizedDescription
-                Task { @MainActor [weak self] in self?.phase = .failed(message) }
+                Task { @MainActor in UpdateChecker.shared.phase = .failed(message) }
             }
         }
     }

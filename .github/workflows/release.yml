@@ -68,7 +68,7 @@ jobs:
 
       - name: Stamp the tag's version
         shell: bash
-        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Test
         run: npm test
