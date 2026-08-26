@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +11,18 @@ if (!executable) throw new Error("Usage: node scripts/packaged-smoke.mjs <execut
 
 const port = 9300 + (process.pid % 500);
 const userData = await mkdtemp(path.join(os.tmpdir(), "ilabel2-smoke-"));
+
+/* The updater's one outbound request goes to this throwaway feed, so the real
+   packaged binary walks its real "an update exists" path on the runner. */
+const feedServer = createServer((_request, response) => {
+  response.setHeader("content-type", "application/json");
+  response.end(JSON.stringify({
+    win: { version: "9.9.9", url: "https://example.invalid/update", notes: "smoke feed" },
+    linux: { version: "9.9.9", url: "https://example.invalid/update", notes: "smoke feed" },
+  }));
+});
+await new Promise((resolve) => feedServer.listen(0, "127.0.0.1", resolve));
+const feedURL = `http://127.0.0.1:${feedServer.address().port}/feed.json`;
 const output = [];
 const application = spawn(executable, [
   `--remote-debugging-port=${port}`,
@@ -20,6 +33,7 @@ const application = spawn(executable, [
   shell: false,
   windowsHide: true,
   stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, ILABEL_UPDATE_FEED: feedURL },
 });
 application.stdout.on("data", (chunk) => output.push(String(chunk)));
 application.stderr.on("data", (chunk) => output.push(String(chunk)));
@@ -137,6 +151,39 @@ try {
   assert(initial.default680, "A new packaged app did not start as a blank official 680 document.");
   assert(initial.nativeTheme, "A fresh packaged app did not start with the native light appearance.");
   assert(initial.api && initial.os === "success", "The preload API is unavailable.");
+
+  /* The updater announces the feed's 9.9.9 a few seconds after launch. Catch
+     it, photograph it, then put it away so it cannot cover later targets. */
+  let banner = null;
+  const bannerDeadline = Date.now() + 20_000;
+  while (Date.now() < bannerDeadline) {
+    banner = await evaluate(`(() => {
+      const node = document.querySelector('.update-banner');
+      return node ? {
+        text: node.textContent,
+        buttons: [...node.querySelectorAll('button')].map((button) => button.textContent.trim())
+      } : null;
+    })()`);
+    if (banner) break;
+    await delay(250);
+  }
+  assert(
+    banner && banner.text.includes("9.9.9") && banner.text.includes("smoke feed"),
+    `The packaged updater never offered the feed's 9.9.9: ${JSON.stringify(banner)}`,
+  );
+  assert(
+    banner.buttons.includes("Install Update") || banner.buttons.includes("Open Downloads"),
+    `The update banner offers no way to act: ${JSON.stringify(banner)}`,
+  );
+  if (screenshotPath) {
+    const bannerShot = await command("Page.captureScreenshot", { format: "png", fromSurface: true });
+    await writeFile(screenshotPath.replace(/\.png$/, "-update.png"), Buffer.from(bannerShot.data, "base64"));
+  }
+  await evaluate(`[...document.querySelectorAll('.update-banner button')]
+    .find((button) => button.textContent.trim() === 'Later').click()`);
+  await delay(200);
+  const bannerGone = await evaluate("!document.querySelector('.update-banner')");
+  assert(bannerGone, "The update banner did not dismiss.");
 
   const parity = await evaluate(`(() => {
     const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
@@ -571,6 +618,91 @@ try {
     `The next capture was not staged on the blank page: ${JSON.stringify(staged)}`,
   );
 
+  /* Click the label and type — the empty stage must hand the click to a text
+     element and start real keyboard input. */
+  const stagePoint = await evaluate(`(() => {
+    const stage = document.querySelector('.label-editor-stage');
+    const board = document.querySelector('.label-board');
+    if (!stage || !board) throw new Error('The label stage is missing.');
+    const stageBounds = stage.getBoundingClientRect();
+    const boardBounds = board.getBoundingClientRect();
+    const x = Math.max(stageBounds.left + 8, boardBounds.left - 12);
+    return { x, y: stageBounds.top + stageBounds.height / 2 };
+  })()`);
+  await command("Input.dispatchMouseEvent", { type: "mousePressed", ...stagePoint, button: "left", clickCount: 1 });
+  await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...stagePoint, button: "left", clickCount: 1 });
+  let inlineEditor = null;
+  const inlineDeadline = Date.now() + 4_000;
+  while (Date.now() < inlineDeadline) {
+    inlineEditor = await evaluate(`(() => {
+      const overlay = document.querySelector('.label-editor-stage .inline-editor');
+      return overlay ? { text: overlay.innerText } : null;
+    })()`);
+    if (inlineEditor) break;
+    await delay(150);
+  }
+  assert(inlineEditor, "Clicking the empty label did not begin text editing.");
+  const overlayPoint = await evaluate(`(() => {
+    const overlay = document.querySelector('.label-editor-stage .inline-editor');
+    const bounds = overlay.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+  })()`);
+  await command("Input.dispatchMouseEvent", { type: "mousePressed", ...overlayPoint, button: "left", clickCount: 1 });
+  await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...overlayPoint, button: "left", clickCount: 1 });
+  await command("Input.insertText", { text: "W" });
+  await delay(400);
+  const typed = await evaluate(`document.querySelector('.label-editor-stage .inline-editor')?.innerText ?? ''`);
+  assert(typed.includes("W"), `Typing after the label click landed nowhere: ${JSON.stringify(typed)}`);
+  await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await delay(300);
+
+  /* Selection highlights: the inspector swatch paints boxes into the print
+     SVG, and its Clear toggle takes them back out. */
+  await evaluate(`(() => {
+    const field = [...document.querySelectorAll('.field-label')]
+      .find((label) => label.querySelector('span')?.textContent.trim() === 'Highlight');
+    if (!field) throw new Error('The Highlight swatch is missing.');
+    // The swatch starts at "no highlight"; its Use toggle is the real one-click
+    // way a person turns the default yellow on.
+    const use = [...field.querySelectorAll('button')]
+      .find((button) => button.textContent.trim() === 'Use');
+    if (!use) throw new Error('The Highlight swatch has no Use toggle.');
+    use.click();
+    return true;
+  })()`);
+  await delay(400);
+  const highlighted = await evaluate(`(() => {
+    const rects = [...document.querySelectorAll('.label-board .svg-surface [data-role="text-highlights"] rect')];
+    const editor = document.querySelector('.rich-text-editor');
+    const propsKey = editor ? Object.keys(editor).find((key) => key.startsWith('__reactProps')) : null;
+    const rtf = propsKey ? editor[propsKey]?.element?.richTextRTF ?? null : null;
+    return {
+      count: rects.length,
+      fill: rects[0]?.getAttribute('fill'),
+      rtfCarriesBackground: typeof rtf === 'string' ? atob(rtf).includes('\\cb') : null,
+    };
+  })()`);
+  // The boxes render from the element's RTF via the shared parser, so their
+  // presence already proves the round-trip; the rtf probe is advisory only.
+  assert(
+    highlighted.count > 0 && highlighted.fill === "#ffd633",
+    `The highlight never reached the rendered label: ${JSON.stringify(highlighted)}`,
+  );
+  await evaluate(`(() => {
+    const field = [...document.querySelectorAll('.field-label')]
+      .find((label) => label.querySelector('span')?.textContent.trim() === 'Highlight');
+    const clear = [...field.querySelectorAll('button')]
+      .find((button) => button.textContent.trim() === 'Clear');
+    clear.click();
+    return true;
+  })()`);
+  await delay(400);
+  const cleared = await evaluate(
+    `document.querySelectorAll('.label-board .svg-surface [data-role="text-highlights"] rect').length`,
+  );
+  assert(cleared === 0, `Clearing the highlight left ${cleared} boxes behind.`);
+
   if (screenshotPath) {
     await evaluate(`(() => {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -587,6 +719,7 @@ try {
   process.stdout.write(`Packaged smoke passed: ${JSON.stringify({ localFonts: localFont.count, selectedArea, caretTokenContent, ...richText, ...queue, ...staged })}\n`);
 } finally {
   socket.close();
+  feedServer.close();
   application.kill();
   await Promise.race([
     new Promise((resolve) => application.once("exit", resolve)),
