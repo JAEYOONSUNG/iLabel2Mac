@@ -24,6 +24,18 @@ final class Default680Tests: XCTestCase {
         assertCanonical680(store.document)
     }
 
+    func testManualSheetEditClearsOfficialFormatMetadata() {
+        let store = DocumentStore()
+
+        store.updateSheet { $0.labelWidthMM = 13 }
+
+        XCTAssertNil(store.document.formatCode)
+        XCTAssertNil(store.document.formatFamily)
+        XCTAssertNil(store.document.formatSourceURL)
+        XCTAssertNil(store.document.formatPDFTemplateURL)
+        XCTAssertEqual(store.document.sheet.labelWidthMM, 13)
+    }
+
     private func assertCanonical680(
         _ document: LabelDocument,
         file: StaticString = #filePath,

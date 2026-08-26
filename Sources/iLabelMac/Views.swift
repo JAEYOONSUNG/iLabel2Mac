@@ -135,13 +135,14 @@ struct ContentView: View {
             // the right instead of compressing the panes.
             HSplitView {
                 SidebarView(store: store)
-                    .frame(minWidth: 250, idealWidth: 320, maxWidth: 360)
+                    .frame(minWidth: 230, idealWidth: 270, maxWidth: 300)
 
                 EditorPane(store: store)
-                    .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
 
                 InspectorView(store: store)
-                    .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
+                    .frame(minWidth: 280, idealWidth: 310, maxWidth: 340)
             }
         }
         .background(appChromeBackground())
@@ -155,7 +156,7 @@ struct ToolbarStrip: View {
         // Horizontally scrollable so a narrow window scrolls the toolbar
         // instead of clipping the trailing controls.
         ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ControlGroup {
                 Button("New", action: store.newDocument)
                 Button("Open", action: store.openProject)
@@ -186,12 +187,16 @@ struct ToolbarStrip: View {
 
             ControlGroup {
                 Button("CSV", action: store.importCSV)
-                Button("PDF", action: store.exportPDF)
-                    .help("Export the current page as PDF")
-                Button("PDF·All", action: store.exportAllPagesPDF)
-                    .help("Export every page into one multi-page PDF")
-                    .disabled(store.document.pageCount <= 1)
-                Button("PNG", action: store.exportPNG)
+
+                Menu("Export") {
+                    Button("Current Page as PDF", action: store.exportPDF)
+                    Button("All Pages as PDF", action: store.exportAllPagesPDF)
+                        .disabled(store.document.pageCount <= 1)
+                    Divider()
+                    Button("Current Page as PNG", action: store.exportPNG)
+                }
+                .help("Export PDF or PNG")
+
                 Button(store.document.hasQueuedLabels ? "Print Captures" : "Print") {
                     if store.document.hasQueuedLabels {
                         store.printAllPages()
@@ -206,7 +211,7 @@ struct ToolbarStrip: View {
 
             ToolbarSeparator()
 
-            ControlGroup {
+            Menu("Add Object") {
                 Button("Text") { store.addElement(.text) }
                 Button("Shape") { store.addElement(.rectangle) }
                 Button("Image") {
@@ -216,6 +221,7 @@ struct ToolbarStrip: View {
                 Button("QR") { store.addElement(.qrCode) }
                 Button("Barcode") { store.addElement(.code128) }
             }
+            .help("Add text, shape, image, QR, or barcode")
 
             ToolbarSeparator()
 
@@ -234,14 +240,21 @@ struct ToolbarStrip: View {
                     Text(mode.label).tag(mode)
                 }
             }
+            .labelsHidden()
             .pickerStyle(.menu)
-            .frame(width: 96)
+            .frame(width: 82)
+            .help("Appearance")
 
             ToolbarSeparator()
 
             ControlGroup {
-                Button("Prev") { store.movePage(delta: -1) }
+                Button {
+                    store.movePage(delta: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
                     .disabled(store.currentPageIndex == 0)
+                    .help("Previous page")
 
                 Text(
                     store.isCaptureStagingPage
@@ -250,10 +263,15 @@ struct ToolbarStrip: View {
                 )
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 128)
+                    .frame(minWidth: 104)
 
-                Button("Next") { store.movePage(delta: 1) }
+                Button {
+                    store.movePage(delta: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
                     .disabled(store.currentPageIndex >= store.navigationPageCount - 1)
+                    .help("Next page")
             }
 
             Spacer(minLength: 20)
@@ -292,6 +310,7 @@ struct ToolbarStrip: View {
                 endPoint: .bottom
             )
         )
+        .accessibilityIdentifier("toolbar")
     }
 }
 
@@ -303,104 +322,186 @@ struct ToolbarSeparator: View {
     }
 }
 
+enum SidebarSection: String, CaseIterable, Identifiable {
+    case sheet
+    case data
+    case layers
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .sheet: "Sheet"
+        case .data: "Merge Data"
+        case .layers: "Layers"
+        }
+    }
+}
+
 struct SidebarView: View {
     @ObservedObject var store: DocumentStore
+    @AppStorage("sidebar.section") private var selectedSectionRaw = SidebarSection.sheet.rawValue
+    @State private var formatChooserPresented = false
+
+    private var selectedSection: SidebarSection {
+        SidebarSection(rawValue: selectedSectionRaw) ?? .sheet
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GroupBox("Project") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("Title", text: documentBinding(\.title))
+        VStack(spacing: 0) {
+            projectHeader
+                .padding(12)
 
-                        if let format = store.currentFormat {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(format.code)
-                                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                                    Spacer()
-                                    Text(format.family.label)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                }
+            Picker("Setup section", selection: $selectedSectionRaw) {
+                ForEach(SidebarSection.allCases) { section in
+                    Text(section.label).tag(section.rawValue)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
 
-                                Text(format.sizeSummary)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
+            Divider()
 
-                                if format.continuous {
-                                    Text("Continuous stock: preview uses one repeat cell per page.")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.accentColor.opacity(0.08))
-                            )
-                        } else {
-                            Text("No official format selected. You can still edit the sheet manually.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
+            switch selectedSection {
+            case .sheet:
+                sheetPage
+            case .data:
+                dataPage
+            case .layers:
+                layersPage
+            }
+        }
+        .background(appPanelBackground())
+        .sheet(isPresented: $formatChooserPresented) {
+            OfficialFormatChooser(store: store)
+                .frame(minWidth: 620, minHeight: 620)
+        }
+        .accessibilityIdentifier("setupSidebar")
+    }
 
-                        Menu("Quick Presets") {
-                            ForEach(SheetTemplate.presets) { preset in
-                                Button(preset.name) {
-                                    store.applyPreset(id: preset.id)
-                                }
-                            }
-                        }
-                        .disabled(store.document.hasQueuedLabels)
-                    }
+    private var projectHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Project")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if store.document.hasQueuedLabels {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .help("Format and sheet geometry are locked by the capture queue")
+                }
+            }
+
+            TextField("Project title", text: documentBinding(\.title))
+                .controlSize(.small)
+
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.document.formatCode ?? "Custom")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                    Text(store.currentFormat?.sizeSummary ?? currentSheetSummary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                OfficialFormatsSection(
-                    searchText: $store.formatSearchText,
-                    familyFilter: $store.selectedFamilyFilter,
-                    filteredFormats: store.filteredFormats,
-                    totalCount: store.officialFormats.count,
-                    selectedCode: store.document.formatCode,
-                    onApply: { store.applyOfficialFormat(code: $0) }
-                )
-                .equatable()
+                Spacer(minLength: 4)
+
+                Text(store.currentFormat?.family.label ?? "Custom")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.08))
+            )
+
+            HStack(spacing: 6) {
+                Button("Choose Format…") {
+                    formatChooserPresented = true
+                }
                 .disabled(store.document.hasQueuedLabels)
 
-                GroupBox("Sheet") {
-                    VStack(alignment: .leading, spacing: 10) {
+                Menu("Presets") {
+                    ForEach(SheetTemplate.presets) { preset in
+                        Button(preset.name) {
+                            store.applyPreset(id: preset.id)
+                        }
+                    }
+                }
+                .disabled(store.document.hasQueuedLabels)
+                .help("Sheet Presets")
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private var sheetPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                GroupBox("Sheet Layout") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Dimensions in mm")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
                         DimensionGrid(
                             title: "Page",
                             width: sheetBinding(\.pageWidthMM),
                             height: sheetBinding(\.pageHeightMM)
                         )
 
-                        StepperField(title: "Columns", value: sheetBinding(\.columns), range: 1...12)
-                        StepperField(title: "Rows", value: sheetBinding(\.rows), range: 1...20)
+                        LazyVGrid(
+                            columns: [GridItem(.flexible()), GridItem(.flexible())],
+                            spacing: 6
+                        ) {
+                            CompactStepperField(title: "Columns", value: sheetBinding(\.columns), range: 1...12)
+                            CompactStepperField(title: "Rows", value: sheetBinding(\.rows), range: 1...20)
+                        }
 
                         DimensionGrid(
                             title: "Label",
                             width: sheetBinding(\.labelWidthMM),
                             height: sheetBinding(\.labelHeightMM)
                         )
-
                         DimensionGrid(
                             title: "Gap",
                             width: sheetBinding(\.horizontalGapMM),
                             height: sheetBinding(\.verticalGapMM)
                         )
-
                         DimensionGrid(
                             title: "Margins",
                             width: sheetBinding(\.marginLeftMM),
                             height: sheetBinding(\.marginTopMM)
                         )
 
-                        NumberRow(title: "Corner mm", value: sheetBinding(\.cornerRadiusMM))
+                        HStack(alignment: .bottom, spacing: 8) {
+                            CompactDecimalField(
+                                title: "Corner",
+                                unit: "mm",
+                                value: sheetBinding(\.cornerRadiusMM),
+                                step: 0.25,
+                                range: 0...100
+                            )
 
-                        Picker("Shape", selection: sheetBinding(\.shape)) {
-                            ForEach(LabelShape.allCases) { shape in
-                                Text(shape.label).tag(shape)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Shape")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Picker("Shape", selection: sheetBinding(\.shape)) {
+                                    ForEach(LabelShape.allCases) { shape in
+                                        Text(shape.label).tag(shape)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity)
                             }
                         }
                     }
@@ -409,71 +510,144 @@ struct SidebarView: View {
 
                 if store.document.hasQueuedLabels {
                     Label(
-                        "Reset Capture Queue to change the label format or sheet geometry.",
+                        "Open Queue from the Capture bar, then reset it to change the format or sheet layout.",
                         systemImage: "lock.fill"
                     )
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            .padding(12)
+        }
+    }
 
-                GroupBox("Data") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Rows: \(store.document.dataTable?.rows.count ?? 0)")
-                            .font(.system(size: 12, weight: .semibold))
+    private var dataPage: some View {
+        ScrollView {
+            GroupBox("Merge Data") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label(
+                            "\(store.document.dataTable?.rows.count ?? 0) rows",
+                            systemImage: "tablecells"
+                        )
+                        .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Button("Import CSV…", action: store.importCSV)
+                            .controlSize(.small)
+                    }
 
-                        Text("Tokens: {{serial}}, {{page}}, {{slot}}, {{row}}, {{date}}")
+                    Text("Built-in: {{serial}}, {{page}}, {{slot}}, {{row}}, {{date}}")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let headers = store.document.dataTable?.headers, !headers.isEmpty {
+                        Text("CSV columns")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        FlowTokenStack(tokens: headers.map { "{{\($0)}}" }) { token in
+                            store.insertQuickTextPreset(token)
+                        }
+                    } else {
+                        Text("Import a CSV file to create one label per row and insert column tokens into text.")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
-
-                        if let headers = store.document.dataTable?.headers, !headers.isEmpty {
-                            FlowTokenStack(tokens: headers.map { "{{\($0)}}" }) { token in
-                                store.updateSelected { $0.content += token }
-                            }
-                        } else {
-                            Text("Import CSV to enable column merge tokens.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                GroupBox("Objects") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(store.document.elements) { element in
-                            Button {
-                                store.selectElement(element.id, beginEditing: element.type == .text)
-                            } label: {
-                                HStack {
-                                    Text(element.type.label)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                    Text(element.name)
-                                        .lineLimit(1)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(store.selectedElementID == element.id ? Color.accentColor.opacity(0.16) : appCardBackground())
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        HStack {
-                            Button("Duplicate", action: store.duplicateSelected)
-                                .disabled(store.selectedElement == nil)
-                            Button("Delete", action: store.deleteSelected)
-                                .disabled(store.selectedElement == nil)
-                        }
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .padding(14)
+            .padding(12)
         }
-        .background(appPanelBackground())
+    }
+
+    private var layersPage: some View {
+        ScrollView {
+            GroupBox("Layers") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Menu("Add") {
+                            Button("Text") { store.addElement(.text) }
+                            Button("Shape") { store.addElement(.rectangle) }
+                            Button("Image") {
+                                store.addElement(.image)
+                                store.pickImageForSelected()
+                            }
+                            Button("QR") { store.addElement(.qrCode) }
+                            Button("Barcode") { store.addElement(.code128) }
+                        }
+
+                        Button("Duplicate", action: store.duplicateSelected)
+                            .disabled(store.selectedElement == nil)
+                        Button {
+                            store.deleteSelected()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(store.selectedElement == nil)
+                        .help("Delete selected layer")
+                    }
+                    .controlSize(.small)
+
+                    if store.document.elements.isEmpty {
+                        Text("Add text, a shape, an image, QR, or barcode.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 16)
+                    }
+
+                    ForEach(store.document.elements) { element in
+                        Button {
+                            store.selectElement(element.id, beginEditing: element.type == .text)
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: iconName(for: element.type))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 14)
+                                Text(element.name)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text(element.type.label)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(store.selectedElementID == element.id ? Color.accentColor.opacity(0.14) : appCardBackground())
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private var currentSheetSummary: String {
+        let sheet = store.document.sheet
+        return String(
+            format: "%d×%d · %g × %g mm",
+            sheet.columns,
+            sheet.rows,
+            sheet.labelWidthMM,
+            sheet.labelHeightMM
+        )
+    }
+
+    private func iconName(for type: ElementType) -> String {
+        switch type {
+        case .text: "textformat"
+        case .rectangle: "square"
+        case .image: "photo"
+        case .qrCode: "qrcode"
+        case .code128: "barcode"
+        }
     }
 
     private func documentBinding<Value>(_ keyPath: WritableKeyPath<LabelDocument, Value>) -> Binding<Value> {
@@ -512,12 +686,13 @@ struct CompactNumberingSection: View {
                             .foregroundStyle(.secondary)
                         Picker("Mode", selection: serialModeBinding) {
                             ForEach(SerialMode.allCases) { mode in
-                                Text(mode.label).tag(mode)
+                                Text(mode == .rangedSets ? "Range" : mode.label).tag(mode)
                             }
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .frame(maxWidth: .infinity)
+                        .help("Numbering Mode")
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -540,8 +715,7 @@ struct CompactNumberingSection: View {
 
                 LazyVGrid(
                     columns: [
-                        GridItem(.flexible(), spacing: 8),
-                        GridItem(.flexible(), spacing: 8)
+                        GridItem(.adaptive(minimum: 64), spacing: 6)
                     ],
                     alignment: .leading,
                     spacing: 6
@@ -568,24 +742,33 @@ struct CompactNumberingSection: View {
                             range: 1...999
                         )
                     }
+                }
+
+                // These three short values stay on one row, including at the
+                // preview column's 220pt minimum width.
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(minimum: 52), spacing: 6),
+                        GridItem(.flexible(minimum: 52), spacing: 6),
+                        GridItem(.flexible(minimum: 52), spacing: 0)
+                    ],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
                     CompactStepperField(
                         title: "Digits",
                         value: serialIntBinding(\.digits),
                         range: 1...12
                     )
-                }
-
-                HStack(spacing: 8) {
-                    TextField(
-                        "Prefix",
+                    CompactTextField(
+                        title: "Prefix",
                         text: serialStringBinding(\.prefix)
                     )
-                    TextField(
-                        "Suffix",
+                    CompactTextField(
+                        title: "Suffix",
                         text: serialStringBinding(\.suffix)
                     )
                 }
-                .controlSize(.small)
 
                 HStack(spacing: 6) {
                     Image(systemName: "number")
@@ -606,6 +789,7 @@ struct CompactNumberingSection: View {
             }
         }
         .help("Use {{serial}}, {{serial_raw}}, {{set}}, and {{index_in_set}} in label text.")
+        .accessibilityIdentifier("numberingSection")
     }
 
     private var serialModeBinding: Binding<SerialMode> {
@@ -653,8 +837,356 @@ struct CompactNumberingSection: View {
     }
 }
 
+/// Geometry belongs beside the print preview it changes, rather than in the
+/// already-dense appearance inspector. At the normal preview width the four
+/// frame edges occupy one row and the two global transforms occupy the next;
+/// adaptive columns preserve the same controls at the minimum window width.
+struct CompactFrameSection: View {
+    @ObservedObject var store: DocumentStore
+
+    var body: some View {
+        if let selected = store.selectedElement {
+            GroupBox("Frame") {
+                VStack(alignment: .leading, spacing: 8) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: 58), spacing: 4)
+                        ],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        CompactDecimalField(
+                            title: "X",
+                            unit: "mm",
+                            value: selectedBinding(\.frame.x, defaultValue: 0),
+                            step: 0.1
+                        )
+                        CompactDecimalField(
+                            title: "Y",
+                            unit: "mm",
+                            value: selectedBinding(\.frame.y, defaultValue: 0),
+                            step: 0.1
+                        )
+                        CompactDecimalField(
+                            title: "W",
+                            unit: "mm",
+                            value: selectedBinding(\.frame.width, defaultValue: 10),
+                            step: 0.1
+                        )
+                        CompactDecimalField(
+                            title: "H",
+                            unit: "mm",
+                            value: selectedBinding(\.frame.height, defaultValue: 10),
+                            step: 0.1
+                        )
+                    }
+
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: 76), spacing: 6, alignment: .bottom)
+                        ],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        CompactDecimalField(
+                            title: "Rotation",
+                            unit: "deg",
+                            value: selectedBinding(\.rotation, defaultValue: 0),
+                            step: 1
+                        )
+                        CompactDecimalField(
+                            title: "Opacity",
+                            value: selectedBinding(\.opacity, defaultValue: 1),
+                            step: 0.05,
+                            range: 0...1
+                        )
+
+                        if selected.type == .text {
+                            Button {
+                                store.fitSelectedTextToLabel()
+                            } label: {
+                                Label(
+                                    store.document.sheet.shape == .circle ? "Fit" : "Center",
+                                    systemImage: "scope"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .help("Center the text box and keep it inside the label boundary")
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("frameSection")
+        }
+    }
+
+    private func selectedBinding<Value>(
+        _ keyPath: WritableKeyPath<LabelElement, Value>,
+        defaultValue: Value
+    ) -> Binding<Value> {
+        Binding(
+            get: { store.selectedElement?[keyPath: keyPath] ?? defaultValue },
+            set: { newValue in
+                store.updateSelected { element in
+                    element[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+}
+
+struct TextFormattingToolbar: View {
+    @ObservedObject var store: DocumentStore
+    @State private var emojiPresented = false
+    @State private var highlightColor = Color(
+        nsColor: NSColor(calibratedRed: 1.0, green: 0.84, blue: 0.20, alpha: 0.45)
+    )
+
+    var body: some View {
+        if let selected = store.selectedElement, selected.type == .text {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    CommitNumberField(
+                        title: "Size",
+                        value: selected.fontSize,
+                        onCommit: { store.applyTextStyleAction(.fontSize($0)) }
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 58)
+                    .help("Font Size (pt)")
+
+                    FontFamilyPicker(
+                        fontName: selected.fontName,
+                        width: 88,
+                        onSelect: { store.applyTextStyleAction(.fontFamily($0)) }
+                    )
+                    .equatable()
+
+                    ControlGroup {
+                        formatButton("Bold", systemImage: "bold", action: .bold)
+                        formatButton("Italic", systemImage: "italic", action: .italic)
+                        formatButton("Underline", systemImage: "underline", action: .underline)
+                        formatButton("Strikethrough", systemImage: "strikethrough", action: .strikethrough)
+                    }
+
+                    ControlGroup {
+                        Button {
+                            store.applyTextStyleAction(.superscript)
+                        } label: {
+                            Text("x²")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .accessibilityLabel("Superscript")
+                        .help("Superscript")
+
+                        Button {
+                            store.applyTextStyleAction(.subscriptText)
+                        } label: {
+                            Text("x₂")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .accessibilityLabel("Subscript")
+                        .help("Subscript")
+                    }
+
+                    Menu {
+                        Section("Alignment") {
+                        ForEach(TextAlignModel.allCases) { alignment in
+                            Button {
+                                store.updateSelected { $0.textAlignment = alignment }
+                            } label: {
+                                if selected.textAlignment == alignment {
+                                    Label(alignment.rawValue.capitalized, systemImage: "checkmark")
+                                } else {
+                                    Text(alignment.rawValue.capitalized)
+                                }
+                            }
+                        }
+                        }
+
+                        Divider()
+
+                        Section("Direction") {
+                            Button("Horizontal") {
+                                store.applySelectedTextOrientation(vertical: false)
+                            }
+                            Button("Vertical") {
+                                store.applySelectedTextOrientation(vertical: true)
+                            }
+                        }
+
+                        Divider()
+
+                        Button("Clear Formatting", systemImage: "eraser") {
+                            store.applyTextStyleAction(.clearFormatting)
+                        }
+                    } label: {
+                        Image(systemName: alignmentIcon(selected.textAlignment))
+                    }
+                    .help("Alignment, Direction, and Clear Formatting")
+
+                    toolbarColorWell(
+                        title: "Text Color",
+                        selection: Binding(
+                            get: { store.selectedElement?.foreground.color ?? .black },
+                            set: { store.applyTextStyleAction(.textColor(RGBAColor($0))) }
+                        ),
+                        clearHelp: "Reset Text Color",
+                        // Back to the element's own color: a selection loses its
+                        // accent, and element-wide the runs are repainted to base.
+                        onClear: {
+                            store.applyTextStyleAction(
+                                .textColor(store.selectedElement?.foreground ?? .black))
+                        }
+                    )
+
+                    toolbarColorWell(
+                        title: "Highlight",
+                        selection: Binding(
+                            get: { highlightColor },
+                            set: { color in
+                                highlightColor = color
+                                store.applyTextStyleAction(.highlightColor(RGBAColor(color)))
+                            }
+                        ),
+                        clearHelp: "Remove Highlight",
+                        onClear: { store.applyTextStyleAction(.highlightColor(.clear)) }
+                    )
+
+                    Button {
+                        emojiPresented.toggle()
+                    } label: {
+                        Label("Emoji", systemImage: "face.smiling")
+                            .labelStyle(.iconOnly)
+                    }
+                    .help("Insert Emoji")
+                    .popover(isPresented: $emojiPresented, arrowEdge: .bottom) {
+                        EmojiPicker(store: store, isPresented: $emojiPresented)
+                            .padding(12)
+                            .frame(width: 276)
+                    }
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 7)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.07))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
+            )
+            .accessibilityIdentifier("textFormattingToolbar")
+        }
+    }
+
+    private func formatButton(
+        _ title: String,
+        systemImage: String,
+        action: TextStyleAction
+    ) -> some View {
+        Button {
+            store.applyTextStyleAction(action)
+        } label: {
+            Image(systemName: systemImage)
+        }
+        .accessibilityLabel(title)
+        .help(title)
+    }
+
+    private func toolbarColorWell(
+        title: String,
+        selection: Binding<Color>,
+        clearHelp: String,
+        onClear: @escaping () -> Void
+    ) -> some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 2) {
+                ColorPicker(title, selection: selection, supportsOpacity: true)
+                    .labelsHidden()
+                    .frame(width: 28)
+                // The slash is the way back out: pickers can only ever choose
+                // *a* color, so removing one needs its own control.
+                Button(action: onClear) {
+                    Image(systemName: "nosign")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(clearHelp)
+                .accessibilityLabel(clearHelp)
+            }
+        }
+        .help(title)
+    }
+
+    private func alignmentIcon(_ alignment: TextAlignModel) -> String {
+        switch alignment {
+        case .leading: "text.alignleft"
+        case .center: "text.aligncenter"
+        case .trailing: "text.alignright"
+        }
+    }
+}
+
+struct EmojiPicker: View {
+    @ObservedObject var store: DocumentStore
+    @Binding var isPresented: Bool
+
+    private let emojis = [
+        "🧬", "🔬", "🧪", "🧫", "⚗️", "🦠",
+        "✅", "⚠️", "❌", "⭐️", "🔥", "💧",
+        "❄️", "☀️", "🌙", "❤️", "🟢", "🔴",
+        "📌", "📦", "🏷️", "🧠", "💊", "🩸"
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Insert Emoji")
+                .font(.system(size: 13, weight: .semibold))
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 6),
+                spacing: 5
+            ) {
+                ForEach(emojis, id: \.self) { emoji in
+                    Button {
+                        store.insertQuickTextPreset(emoji)
+                        isPresented = false
+                    } label: {
+                        Text(emoji)
+                            .font(.system(size: 19))
+                            .frame(width: 30, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+                    .help("Insert \(emoji)")
+                }
+            }
+
+            Divider()
+
+            Button("More Symbols…") {
+                isPresented = false
+                store.showEmojiPicker()
+            }
+            .controlSize(.small)
+        }
+    }
+}
+
 struct EditorPane: View {
     @ObservedObject var store: DocumentStore
+    @State private var compactOutputPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -695,6 +1227,12 @@ struct EditorPane: View {
                 .padding(.horizontal, 10)
             }
 
+            if store.canvasMode == .label,
+               store.selectedElement?.type == .text {
+                TextFormattingToolbar(store: store)
+                    .padding(.horizontal, 10)
+            }
+
             ZStack {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(
@@ -712,16 +1250,37 @@ struct EditorPane: View {
                     // The preview column scales with the pane instead of a
                     // fixed 420pt, which clipped it when the window shrank.
                     GeometryReader { proxy in
-                        HStack(spacing: 0) {
-                            SingleLabelCanvas(store: store)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if proxy.size.width >= 720 {
+                            HStack(spacing: 0) {
+                                SingleLabelCanvas(store: store)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                            Divider()
-                                .padding(.vertical, 18)
+                                Divider()
+                                    .padding(.vertical, 18)
 
-                            LivePagePreviewPanel(store: store)
-                                .frame(width: min(420, max(220, proxy.size.width * 0.4)))
-                                .frame(maxHeight: .infinity)
+                                LivePagePreviewPanel(store: store)
+                                    .frame(width: min(380, max(240, proxy.size.width * 0.36)))
+                                    .frame(maxHeight: .infinity)
+                            }
+                        } else {
+                            ZStack(alignment: .topTrailing) {
+                                SingleLabelCanvas(store: store)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                                Button {
+                                    compactOutputPresented.toggle()
+                                } label: {
+                                    Label("Output", systemImage: "printer")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .padding(10)
+                                .popover(isPresented: $compactOutputPresented, arrowEdge: .trailing) {
+                                    LivePagePreviewPanel(store: store)
+                                        .frame(width: 360, height: 620)
+                                        .background(appPanelBackground())
+                                }
+                            }
                         }
                     }
                 } else {
@@ -732,6 +1291,7 @@ struct EditorPane: View {
             .padding(.bottom, 10)
         }
         .background(appChromeBackground().opacity(0.98))
+        .accessibilityIdentifier("editorPane")
     }
 
     private var currentPrintSpec: String {
@@ -745,322 +1305,360 @@ struct EditorPane: View {
     }
 }
 
+enum ObjectInspectorSection: String, CaseIterable, Identifiable {
+    case content
+    case style
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+enum PageInspectorSection: String, CaseIterable, Identifiable {
+    case print
+    case object
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
 struct InspectorView: View {
     @ObservedObject var store: DocumentStore
     // Remembered per user: these are set once and then ignored for weeks.
     @AppStorage("inspector.notesExpanded") private var notesExpanded = false
     @AppStorage("inspector.wifiExpanded") private var wifiExpanded = false
+    @AppStorage("inspector.snippetsExpanded") private var snippetsExpanded = false
+    @AppStorage("inspector.objectSection") private var objectSectionRaw = ObjectInspectorSection.content.rawValue
+    @AppStorage("inspector.pageSection") private var pageSectionRaw = PageInspectorSection.print.rawValue
 
-    private var availableFontFamilies: [String] {
-        installedFontFamilies
+    private var objectSection: ObjectInspectorSection {
+        ObjectInspectorSection(rawValue: objectSectionRaw) ?? .content
+    }
+
+    private var pageSection: PageInspectorSection {
+        PageInspectorSection(rawValue: pageSectionRaw) ?? .print
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Numbering and capture moved next to the print preview they drive,
-            // so this panel is now only about the selected object plus two
-            // rarely-touched settings groups, which stay collapsed.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                // Page mode hides the preview column that normally hosts these,
-                // so they come back here rather than becoming unreachable.
-                if store.canvasMode != .label {
-                    CompactNumberingSection(store: store)
-                    PrintQueueSection(store: store)
+            if store.canvasMode != .label {
+                Picker("Inspector section", selection: $pageSectionRaw) {
+                    ForEach(PageInspectorSection.allCases) { section in
+                        Text(section.label).tag(section.rawValue)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .padding(10)
 
-                if let selected = store.selectedElement {
-                    GroupBox("Selected Object") {
+                Divider()
+            }
+
+            if store.canvasMode != .label {
+                if pageSection == .print {
+                    ScrollView {
                         VStack(alignment: .leading, spacing: 10) {
-                            TextField("Name", text: selectedBinding(\.name, defaultValue: ""))
-
-                            LabeledInfoRow(label: "Type", value: selected.type.label)
-
-                            if selected.type == .text || selected.type == .qrCode || selected.type == .code128 {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Content")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-
-                                    TextEditor(text: selectedBinding(\.content, defaultValue: ""))
-                                        .font(.system(size: 12))
-                                        .frame(height: 84)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                                        )
-
-                                    FlowTokenStack(
-                                        tokens: ["{{serial}}", "{{serial_raw}}", "{{set}}", "{{index_in_set}}", "{{page}}", "{{slot}}", "{{row}}", "{{date}}"] + (store.document.dataTable?.headers.map { "{{\($0)}}" } ?? [])
-                                    ) { token in
-                                        store.updateSelected { $0.content += token }
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("Quick Presets")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.secondary)
-
-                                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
-                                            ForEach(store.quickTextPresets, id: \.self) { preset in
-                                                HStack(spacing: 4) {
-                                                    Button(preset) {
-                                                        store.insertQuickTextPreset(preset)
-                                                    }
-                                                    .buttonStyle(.bordered)
-                                                    .font(.system(size: 11))
-
-                                                    Button {
-                                                        store.removeQuickTextPreset(preset)
-                                                    } label: {
-                                                        Image(systemName: "xmark.circle.fill")
-                                                            .font(.system(size: 11))
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                    .foregroundStyle(.secondary)
-                                                }
-                                            }
-                                        }
-
-                                        HStack(spacing: 8) {
-                                            TextField("Add preset", text: $store.newQuickTextPreset)
-                                            Button("Save") {
-                                                store.addQuickTextPreset()
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if selected.type == .image {
-                                Button("Choose Image", action: store.pickImageForSelected)
-                            }
+                            CompactNumberingSection(store: store)
+                            CompactFrameSection(store: store)
                         }
-                    }
-
-                    GroupBox("Frame") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            DimensionGrid(
-                                title: "Position",
-                                width: selectedBinding(\.frame.x, defaultValue: 0),
-                                height: selectedBinding(\.frame.y, defaultValue: 0),
-                                xLabel: "X",
-                                yLabel: "Y"
-                            )
-
-                            DimensionGrid(
-                                title: "Size",
-                                width: selectedBinding(\.frame.width, defaultValue: 10),
-                                height: selectedBinding(\.frame.height, defaultValue: 10)
-                            )
-
-                            NumberRow(title: "Rotation", value: selectedBinding(\.rotation, defaultValue: 0), suffix: "deg", step: 1)
-                            NumberRow(title: "Opacity", value: selectedBinding(\.opacity, defaultValue: 1), suffix: "", step: 0.05, range: 0...1)
-
-                            if selected.type == .text {
-                                Button {
-                                    store.fitSelectedTextToLabel()
-                                } label: {
-                                    Label(
-                                        store.document.sheet.shape == .circle ? "Fit Text to Circle" : "Center in Label",
-                                        systemImage: "scope"
-                                    )
-                                }
-                                .buttonStyle(.bordered)
-                                .help("Center the text box and keep it inside the label boundary")
-                            }
-                        }
-                    }
-
-                    GroupBox("Appearance") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if selected.type == .text {
-                                HStack(alignment: .center, spacing: 10) {
-                                    Text("Size")
-                                        .font(.system(size: 12))
-                                        .frame(width: 32, alignment: .leading)
-                                    // Editing + selection → resizes just the
-                                    // selection; otherwise the whole element.
-                                    CommitNumberField(
-                                        title: "Size",
-                                        value: store.selectedElement?.fontSize ?? 12,
-                                        onCommit: { store.applyTextStyleAction(.fontSize($0)) }
-                                    )
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 64)
-                                    Text("pt")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-
-                                    Spacer(minLength: 8)
-
-                                    Text("Font")
-                                        .font(.system(size: 12))
-                                    FontFamilyPicker(
-                                        fontName: selected.fontName,
-                                        onSelect: { store.applyTextStyleAction(.fontFamily($0)) }
-                                    )
-                                    .equatable()
-                                }
-
-                                if !fontFamilyIsAvailable(selected.fontName) {
-                                    Label("‘\(selected.fontName)’ isn't installed on this Mac — text falls back to the system font, so its size and position may differ from the original.", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.orange)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                HStack(alignment: .center, spacing: 10) {
-                                    Button("Bold") {
-                                        store.applyTextStyleAction(.bold)
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Button("Italic") {
-                                        store.applyTextStyleAction(.italic)
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Button("Underline") {
-                                        store.applyTextStyleAction(.underline)
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Text("Align")
-                                        .font(.system(size: 12))
-                                    Picker("Align", selection: selectedBinding(\.textAlignment, defaultValue: .center)) {
-                                        ForEach(TextAlignModel.allCases) { alignment in
-                                            Text(alignment.rawValue.capitalized).tag(alignment)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .pickerStyle(.menu)
-                                    .frame(width: 96)
-                                    Spacer(minLength: 0)
-                                }
-                            }
-
-                            if selected.type == .image {
-                                Picker("Scaling", selection: selectedBinding(\.imageScaleMode, defaultValue: .fit)) {
-                                    ForEach(ImageScaleMode.allCases) { mode in
-                                        Text(mode.rawValue.capitalized).tag(mode)
-                                    }
-                                }
-                            }
-
-                            if selected.type == .text {
-                                // Routed through the style action so it colors
-                                // the selected characters while editing, and the
-                                // whole element otherwise — same rule as
-                                // font/size.
-                                ColorRow(
-                                    title: "Text color",
-                                    selection: Binding(
-                                        get: { store.selectedElement?.foreground.color ?? RGBAColor.black.color },
-                                        set: { store.applyTextStyleAction(.textColor(RGBAColor($0))) }
-                                    )
-                                )
-                            } else {
-                                ColorRow(title: "Foreground", selection: selectedColorBinding(\.foreground, defaultValue: .black))
-                                    .opacity(selected.type == .rectangle || selected.type == .image ? 0.4 : 1)
-                            }
-                            ColorRow(title: "Background", selection: selectedColorBinding(\.background, defaultValue: .clear))
-                            ColorRow(title: "Stroke", selection: selectedColorBinding(\.stroke, defaultValue: .clear))
-                            NumberRow(title: "Stroke pt", value: selectedBinding(\.strokeWidth, defaultValue: 0))
-                            NumberRow(title: "Corner mm", value: selectedBinding(\.cornerRadiusMM, defaultValue: 0))
-                        }
+                        .padding(10)
                     }
                 } else {
-                    GroupBox("Selection") {
-                        Text("Select an object from the canvas or object list to edit it.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
+                    objectInspector
                 }
 
-                DisclosureGroup("Project Notes", isExpanded: $notesExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextEditor(text: documentBinding(\.notes))
-                            .font(.system(size: 12))
-                            .frame(height: 88)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                            )
-                    }
-                }
-
-                DisclosureGroup("Wi-Fi Print", isExpanded: $wifiExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Switch Wi-Fi on Print", isOn: printBinding(\.enabled))
-
-                        TextField("Wi-Fi Service", text: printStringBinding(\.wifiService))
-
-                        TextField("Printer SSID", text: printStringBinding(\.printerSSID))
-                            .disabled(!store.document.printAutomation.enabled)
-
-                        SecureField("Printer Wi-Fi Password", text: printStringBinding(\.printerPassword))
-                            .disabled(!store.document.printAutomation.enabled)
-
-                        Toggle("Return to previous Wi-Fi", isOn: printBinding(\.reconnectToPreviousWiFi))
-                            .disabled(!store.document.printAutomation.enabled)
-
-                        // macOS 15+ hides the current SSID from apps, so the
-                        // pre-print network often can't be captured; this names
-                        // the network to fall back to. Empty → the top
-                        // non-printer preferred network is used.
-                        TextField("Restore SSID (empty = auto)", text: Binding(
-                            get: { store.document.printAutomation.restoreSSID ?? "" },
-                            set: { newValue in
-                                store.updateDocument { document in
-                                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    document.printAutomation.restoreSSID = trimmed.isEmpty ? nil : trimmed
-                                }
-                            }
-                        ))
-                        .disabled(!store.document.printAutomation.enabled || !store.document.printAutomation.reconnectToPreviousWiFi)
-
-                        NumberRow(title: "Settle sec", value: printDoubleBinding(\.settleSeconds), suffix: "sec")
-                            .opacity(store.document.printAutomation.enabled ? 1 : 0.5)
-
-                        HStack {
-                            Button("Auto Fill") {
-                                store.autofillPrintAutomationSettings()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Save Wi-Fi") {
-                                store.savePrintAutomationSettings()
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button("Connect Test") {
-                                store.testPrintAutomationConnection()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Spacer()
-
-                            Text("Current: \(store.currentWiFiSSID)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Text("Status: \(store.wifiTestStatus)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-
-                        Text("When enabled, Print will switch to the printer SSID, open the macOS print panel, then reconnect to your previous Wi-Fi.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                }
-                .padding(14)
+                Divider()
+                CaptureQueueBar(store: store)
+            } else {
+                objectInspector
             }
         }
         .background(appPanelBackground())
+        .accessibilityIdentifier("inspector")
+    }
+
+    private var objectInspector: some View {
+        VStack(spacing: 0) {
+            if let selected = store.selectedElement {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        TextField("Object name", text: selectedBinding(\.name, defaultValue: ""))
+                            .controlSize(.small)
+
+                        Text(selected.type.label)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(Color.secondary.opacity(0.10))
+                            )
+                    }
+
+                    if selected.type != .rectangle {
+                        Picker("Object inspector", selection: $objectSectionRaw) {
+                            ForEach(ObjectInspectorSection.allCases) { section in
+                                Text(section.label).tag(section.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(10)
+
+                Divider()
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let selected = store.selectedElement {
+                        if selected.type == .rectangle {
+                            selectionStyle(selected)
+                        } else {
+                            switch objectSection {
+                            case .content:
+                                selectionContent(selected)
+                            case .style:
+                                selectionStyle(selected)
+                            }
+                        }
+                    } else {
+                        GroupBox("Selection") {
+                            Text("Select a layer or click an object on the label to edit it.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    projectSettings
+                }
+                .padding(10)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func selectionContent(_ selected: LabelElement) -> some View {
+        GroupBox("Content") {
+            VStack(alignment: .leading, spacing: 8) {
+                if selected.type == .text || selected.type == .qrCode || selected.type == .code128 {
+                    TextEditor(text: selectedBinding(\.content, defaultValue: ""))
+                        .font(.system(size: 12))
+                        .frame(height: 96)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                        )
+
+                    HStack(spacing: 7) {
+                        Menu("Insert Token") {
+                            ForEach(mergeTokens, id: \.self) { token in
+                                Button(token) {
+                                    store.insertQuickTextPreset(token)
+                                }
+                            }
+                        }
+
+                        if selected.type == .text {
+                            Menu("Text Snippets") {
+                                ForEach(store.quickTextPresets, id: \.self) { preset in
+                                    Button(preset) {
+                                        store.insertQuickTextPreset(preset)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .controlSize(.small)
+
+                    if selected.type == .text {
+                        DisclosureGroup("Manage Text Snippets", isExpanded: $snippetsExpanded) {
+                            VStack(alignment: .leading, spacing: 7) {
+                                ForEach(store.quickTextPresets, id: \.self) { preset in
+                                    HStack(spacing: 6) {
+                                        Text(preset)
+                                            .font(.system(size: 10))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 4)
+                                        Button {
+                                            store.removeQuickTextPreset(preset)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(.secondary)
+                                        .help("Remove snippet")
+                                    }
+                                }
+
+                                HStack(spacing: 6) {
+                                    TextField("New snippet", text: $store.newQuickTextPreset)
+                                    Button("Save") { store.addQuickTextPreset() }
+                                        .buttonStyle(.borderedProminent)
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(.top, 6)
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                    }
+                } else if selected.type == .image {
+                    Button("Choose Image…", action: store.pickImageForSelected)
+                } else {
+                    Text("Shapes have no editable content. Use Style to set fill, stroke, and corner radius.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func selectionStyle(_ selected: LabelElement) -> some View {
+        if store.canvasMode != .label, selected.type == .text {
+            Button {
+                store.canvasMode = .label
+                store.selectElement(selected.id, beginEditing: true)
+            } label: {
+                Label("Edit Text & Rich Formatting", systemImage: "textformat")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+
+        if selected.type == .text, !fontFamilyIsAvailable(selected.fontName) {
+            Label(
+                "‘\(selected.fontName)’ isn't installed; text uses a fallback and may shift.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.system(size: 10))
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        GroupBox("Appearance") {
+            VStack(alignment: .leading, spacing: 9) {
+                if selected.type == .image {
+                    Picker("Scaling", selection: selectedBinding(\.imageScaleMode, defaultValue: .fit)) {
+                        ForEach(ImageScaleMode.allCases) { mode in
+                            Text(mode.rawValue.capitalized).tag(mode)
+                        }
+                    }
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 74), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    if selected.type == .qrCode || selected.type == .code128 {
+                        CompactColorField(
+                            title: "Foreground",
+                            selection: selectedColorBinding(\.foreground, defaultValue: .black)
+                        )
+                    }
+                    CompactColorField(
+                        title: "Background",
+                        selection: selectedColorBinding(\.background, defaultValue: .clear)
+                    )
+                    CompactColorField(
+                        title: "Stroke",
+                        selection: selectedColorBinding(\.stroke, defaultValue: .clear)
+                    )
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())],
+                    spacing: 8
+                ) {
+                    CompactDecimalField(
+                        title: "Stroke",
+                        unit: "pt",
+                        value: selectedBinding(\.strokeWidth, defaultValue: 0),
+                        step: 0.25,
+                        range: 0...100
+                    )
+                    CompactDecimalField(
+                        title: "Corner",
+                        unit: "mm",
+                        value: selectedBinding(\.cornerRadiusMM, defaultValue: 0),
+                        step: 0.25,
+                        range: 0...100
+                    )
+                }
+            }
+        }
+    }
+
+    private var mergeTokens: [String] {
+        ["{{serial}}", "{{serial_raw}}", "{{set}}", "{{index_in_set}}", "{{page}}", "{{slot}}", "{{row}}", "{{date}}"]
+            + (store.document.dataTable?.headers.map { "{{\($0)}}" } ?? [])
+    }
+
+    private var projectSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DisclosureGroup("Project Notes", isExpanded: $notesExpanded) {
+                TextEditor(text: documentBinding(\.notes))
+                    .font(.system(size: 12))
+                    .frame(height: 88)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
+                    .padding(.top, 6)
+            }
+
+            DisclosureGroup("Wi-Fi Print", isExpanded: $wifiExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Switch Wi-Fi on Print", isOn: printBinding(\.enabled))
+                    TextField("Wi-Fi Service", text: printStringBinding(\.wifiService))
+                    TextField("Printer SSID", text: printStringBinding(\.printerSSID))
+                        .disabled(!store.document.printAutomation.enabled)
+                    SecureField("Printer Wi-Fi Password", text: printStringBinding(\.printerPassword))
+                        .disabled(!store.document.printAutomation.enabled)
+                    Toggle("Return to previous Wi-Fi", isOn: printBinding(\.reconnectToPreviousWiFi))
+                        .disabled(!store.document.printAutomation.enabled)
+                    TextField("Restore SSID (empty = auto)", text: Binding(
+                        get: { store.document.printAutomation.restoreSSID ?? "" },
+                        set: { newValue in
+                            store.updateDocument { document in
+                                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                document.printAutomation.restoreSSID = trimmed.isEmpty ? nil : trimmed
+                            }
+                        }
+                    ))
+                    .disabled(!store.document.printAutomation.enabled || !store.document.printAutomation.reconnectToPreviousWiFi)
+
+                    NumberRow(
+                        title: "Settle time",
+                        value: printDoubleBinding(\.settleSeconds),
+                        suffix: "sec"
+                    )
+                    .opacity(store.document.printAutomation.enabled ? 1 : 0.5)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 82), spacing: 6)], spacing: 6) {
+                        Button("Auto Fill", action: store.autofillPrintAutomationSettings)
+                        Button("Save Wi-Fi", action: store.savePrintAutomationSettings)
+                            .buttonStyle(.borderedProminent)
+                        Button("Connect Test", action: store.testPrintAutomationConnection)
+                    }
+                    .controlSize(.small)
+
+                    Text("Current: \(store.currentWiFiSSID) · \(store.wifiTestStatus)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 6)
+            }
+        }
     }
 
     private func documentBinding<Value>(_ keyPath: WritableKeyPath<LabelDocument, Value>) -> Binding<Value> {
@@ -1132,6 +1730,7 @@ struct InspectorView: View {
 
 struct PrintQueueSection: View {
     @ObservedObject var store: DocumentStore
+    var showsCaptureControls = true
 
     private var batches: [PrintBatch] {
         store.document.printBatches
@@ -1140,28 +1739,30 @@ struct PrintQueueSection: View {
     var body: some View {
         GroupBox("Capture Queue") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Each capture locks its label, Numbering/CSV setup, page, and start position. Changing the sheet start area only affects the next capture.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack {
-                    Text("Current setup")
-                    Spacer()
-                    Text("\(store.document.currentSetupLabelCount) label(s)")
-                        .monospacedDigit()
+                if showsCaptureControls {
+                    Text("Capture freezes the current label, merge data, numbering, page, and start position.")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                }
-                .font(.system(size: 11, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Button {
-                    store.enqueueCurrentLabel()
-                } label: {
-                    Label("Capture Current Setup", systemImage: "camera.fill")
-                        .frame(maxWidth: .infinity)
+                    HStack {
+                        Text("Current setup")
+                        Spacer()
+                        Text("\(store.document.currentSetupLabelCount) label(s)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+
+                    Button {
+                        store.enqueueCurrentLabel()
+                    } label: {
+                        Label("Capture Current Setup", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!store.canCaptureCurrentLabel)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!store.canCaptureCurrentLabel)
 
                 if let issue = store.captureQueueIssue
                     ?? store.pendingDraftIssueMessage {
@@ -1293,74 +1894,164 @@ struct PrintQueueSection: View {
     }
 }
 
-/// The catalog list is ~180 visible rows out of 1,006 formats and the sidebar
-/// body runs on every keystroke; behind .equatable() the list only rebuilds
-/// when the search, family filter, or selected format actually changes.
-struct OfficialFormatsSection: View, Equatable {
-    @Binding var searchText: String
-    @Binding var familyFilter: ProductFamily?
-    let filteredFormats: [OfficialFormatDefinition]
-    let totalCount: Int
-    let selectedCode: String?
-    let onApply: (String) -> Void
+struct CaptureQueueBar: View {
+    @ObservedObject var store: DocumentStore
+    @State private var queuePresented = false
 
-    static func == (lhs: OfficialFormatsSection, rhs: OfficialFormatsSection) -> Bool {
-        lhs.searchText == rhs.searchText
-            && lhs.familyFilter == rhs.familyFilter
-            && lhs.selectedCode == rhs.selectedCode
+    private var batches: [PrintBatch] {
+        store.document.printBatches
     }
 
     var body: some View {
-        GroupBox("Official Formats") {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("Search code or size", text: $searchText)
+        VStack(alignment: .leading, spacing: 5) {
+            if let issue = store.captureQueueIssue ?? store.pendingDraftIssueMessage {
+                Text(issue)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            } else if store.document.hasQueuedLabels,
+                      store.pendingDraftPageIndex == nil {
+                Text("Choose an empty position for the next capture.")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
 
-                Picker("Family", selection: $familyFilter) {
+            HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("CURRENT")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(store.document.currentSetupLabelCount) labels")
+                        .font(.system(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    store.enqueueCurrentLabel()
+                } label: {
+                    Label("Capture", systemImage: "camera.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!store.canCaptureCurrentLabel)
+
+                Button {
+                    queuePresented.toggle()
+                } label: {
+                    ViewThatFits(in: .horizontal) {
+                        Label("Queue \(batches.count)", systemImage: "tray.full")
+                        Label("\(batches.count)", systemImage: "tray.full")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Open Capture Queue")
+                .popover(isPresented: $queuePresented, arrowEdge: .bottom) {
+                    PrintQueueSection(store: store, showsCaptureControls: false)
+                        .padding(12)
+                        .frame(width: 380)
+                        .frame(minHeight: 180, maxHeight: 520)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(appPanelBackground())
+        .accessibilityIdentifier("captureQueueBar")
+    }
+}
+
+struct OfficialFormatChooser: View {
+    @ObservedObject var store: DocumentStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Choose Official Format")
+                        .font(.system(size: 18, weight: .semibold))
+                    Text("Search all \(store.officialFormats.count) iLabel formats")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                TextField("Search code, label size, or sheet layout", text: $store.formatSearchText)
+                    .textFieldStyle(.roundedBorder)
+
+                Picker("Family", selection: $store.selectedFamilyFilter) {
                     Text("All Families").tag(Optional<ProductFamily>.none)
                     ForEach(ProductFamily.allCases) { family in
                         Text(family.label).tag(Optional(family))
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
+                .frame(width: 150)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
 
-                Text("\(filteredFormats.count) matches / \(totalCount) official formats")
-                    .font(.system(size: 11))
+            HStack {
+                Text("\(store.filteredFormats.count) matches")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
+                Spacer()
+                if let code = store.document.formatCode {
+                    Text("Current · \(code)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
 
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(filteredFormats.prefix(180))) { format in
-                            Button {
-                                onApply(format.code)
-                            } label: {
-                                HStack(alignment: .top, spacing: 8) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(format.code)
-                                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                                        Text(format.sizeSummary)
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(.secondary)
-                                        Text(format.detailSummary)
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(.secondary)
-                                    }
+            List(store.filteredFormats) { format in
+                Button {
+                    store.applyOfficialFormat(code: format.code)
+                    dismiss()
+                } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(format.code)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .frame(width: 58, alignment: .leading)
 
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(selectedCode == format.code ? Color.accentColor.opacity(0.16) : appCardBackground())
-                                )
-                            }
-                            .buttonStyle(.plain)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(format.sizeSummary)
+                                .font(.system(size: 12, weight: .medium))
+                            Text(format.detailSummary)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text(format.family.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        if store.document.formatCode == format.code {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.accentColor)
                         }
                     }
+                    .contentShape(Rectangle())
                 }
-                .frame(minHeight: 240, maxHeight: 320)
+                .buttonStyle(.plain)
+                .padding(.vertical, 3)
             }
+            .listStyle(.inset)
         }
+        .background(appPanelBackground())
     }
 }
 
@@ -1369,10 +2060,11 @@ struct OfficialFormatsSection: View, Equatable {
 /// rebuilt when the selected element's font actually changes.
 struct FontFamilyPicker: View, Equatable {
     let fontName: String
+    var width: CGFloat = 118
     let onSelect: (String) -> Void
 
     static func == (lhs: FontFamilyPicker, rhs: FontFamilyPicker) -> Bool {
-        lhs.fontName == rhs.fontName
+        lhs.fontName == rhs.fontName && lhs.width == rhs.width
     }
 
     var body: some View {
@@ -1392,7 +2084,7 @@ struct FontFamilyPicker: View, Equatable {
         }
         .labelsHidden()
         .pickerStyle(.menu)
-        .frame(width: 118)
+        .frame(width: width)
     }
 }
 
@@ -1732,8 +2424,9 @@ struct InlineEditableTextField: View {
                 isCircular: usesCircularTextFlow,
                 cornerRadius: 8
             )
-                .stroke(Color.accentColor, lineWidth: 2)
+                .stroke(Color.accentColor, lineWidth: 2.5)
         )
+        .shadow(color: Color.accentColor.opacity(0.20), radius: 8)
     }
 }
 
@@ -2184,6 +2877,7 @@ struct AppKitInlineTextField: NSViewRepresentable {
         weak var textView: NSTextView?
         var presetObserver: NSObjectProtocol?
         var styleObserver: NSObjectProtocol?
+        var emojiObserver: NSObjectProtocol?
         var lastSelectedRange = NSRange(location: 0, length: 0)
         var lastAppliedRichTextData: Data?
         var lastAppliedStyle: EditorStyleSignature?
@@ -2224,6 +2918,17 @@ struct AppKitInlineTextField: NSViewRepresentable {
                 else { return }
                 self.applyStyle(request, to: textView)
             }
+            emojiObserver = NotificationCenter.default.addObserver(
+                forName: showEmojiPickerNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let textView = self?.textView else { return }
+                textView.window?.makeFirstResponder(textView)
+                DispatchQueue.main.async {
+                    NSApp.orderFrontCharacterPalette(nil)
+                }
+            }
         }
 
         deinit {
@@ -2232,6 +2937,9 @@ struct AppKitInlineTextField: NSViewRepresentable {
             }
             if let styleObserver {
                 NotificationCenter.default.removeObserver(styleObserver)
+            }
+            if let emojiObserver {
+                NotificationCenter.default.removeObserver(emojiObserver)
             }
         }
 
@@ -2288,9 +2996,10 @@ struct AppKitInlineTextField: NSViewRepresentable {
             // also keeps element.fontName/fontSize (and the inspector fields)
             // in sync. B/I/U keep their old apply-to-all behavior here.
             switch action {
-            case .fontFamily, .fontSize, .textColor:
+            case .fontFamily, .fontSize, .textColor, .clearFormatting:
                 guard hasExplicitSelection else { return }
-            case .bold, .italic, .underline:
+            case .bold, .italic, .underline, .strikethrough, .superscript,
+                 .subscriptText, .highlightColor:
                 break
             }
 
@@ -2312,6 +3021,22 @@ struct AppKitInlineTextField: NSViewRepresentable {
                 case .underline:
                     let current = (attributes[.underlineStyle] as? Int) ?? 0
                     updatedAttributes[.underlineStyle] = current == 0 ? NSUnderlineStyle.single.rawValue : 0
+                case .strikethrough, .superscript, .subscriptText,
+                     .highlightColor, .clearFormatting:
+                    let clearsFormatting = action == .clearFormatting
+                    updatedAttributes = RichTextFormatting.applyingAdvancedAction(
+                        action,
+                        to: attributes,
+                        baseFont: resolvedNSFont(
+                            name: self.parent.fontName,
+                            size: self.parent.fontSize,
+                            isBold: clearsFormatting ? false : self.parent.isBold,
+                            isItalic: clearsFormatting ? false : self.parent.isItalic
+                        ),
+                        baseForeground: self.parent.foreground,
+                        alignment: self.parent.alignment.nsTextAlignment,
+                        baseUnderline: clearsFormatting ? false : self.parent.isUnderline
+                    )
                 case .fontFamily(let name):
                     let currentFont = (attributes[.font] as? NSFont) ?? resolvedNSFont(name: self.parent.fontName, size: self.parent.fontSize, isBold: self.parent.isBold, isItalic: self.parent.isItalic)
                     let traits = NSFontManager.shared.traits(of: currentFont)
@@ -2386,13 +3111,18 @@ struct LivePagePreviewPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     CompactNumberingSection(store: store)
-                    PrintQueueSection(store: store)
+                    CompactFrameSection(store: store)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: 300)
+
+            Divider()
+
+            CaptureQueueBar(store: store)
         }
+        .accessibilityIdentifier("livePagePreviewPanel")
     }
 }
 
@@ -2474,8 +3204,9 @@ struct LivePagePreviewBody: View, Equatable {
                 )
 
             HStack {
-                Button("Reset Area", action: onResetArea)
-                .buttonStyle(.bordered)
+                Button("Reset", action: onResetArea)
+                    .buttonStyle(.bordered)
+                    .help("Reset selected print area")
 
                 Label(
                     document.hasQueuedLabels ? "Captured" : "Print now",
@@ -3070,40 +3801,11 @@ struct NumberField: View {
             HStack(spacing: 4) {
                 TextField(label, value: value, formatter: UIFormatters.decimal)
                     .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
                 Stepper(label, value: SteppedValue.binding(value, range: nil), step: step)
                     .labelsHidden()
+                    .controlSize(.small)
             }
-        }
-    }
-}
-
-struct StepperField: View {
-    let title: String
-    let value: Binding<Int>
-    let range: ClosedRange<Int>
-
-    private var clampedValue: Binding<Int> {
-        Binding(
-            get: {
-                min(max(value.wrappedValue, range.lowerBound), range.upperBound)
-            },
-            set: { newValue in
-                value.wrappedValue = min(max(newValue, range.lowerBound), range.upperBound)
-            }
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(title)
-            Spacer()
-            TextField(title, value: clampedValue, formatter: UIFormatters.integer)
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
-                .frame(width: 78)
-            Stepper(title, value: clampedValue, in: range)
-                .labelsHidden()
         }
     }
 }
@@ -3140,6 +3842,7 @@ struct CompactStepperField: View {
                     formatter: UIFormatters.integer
                 )
                 .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
@@ -3153,32 +3856,78 @@ struct CompactStepperField: View {
     }
 }
 
-struct ColorRow: View {
+struct CompactTextField: View {
     let title: String
-    let selection: Binding<Color>
+    let text: Binding<String>
 
     var body: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-            Spacer()
-            ColorPicker(title, selection: selection)
-                .labelsHidden()
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            TextField(title, text: text)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
         }
     }
 }
 
-struct LabeledInfoRow: View {
-    let label: String
-    let value: String
+struct CompactDecimalField: View {
+    let title: String
+    var unit: String? = nil
+    let value: Binding<Double>
+    var step: Double = 0.5
+    var range: ClosedRange<Double>? = nil
 
     var body: some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(title)
+                    .fontWeight(.semibold)
+                if let unit {
+                    Text(unit)
+                        .fontWeight(.regular)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.system(size: 10))
+
+            HStack(spacing: 3) {
+                TextField(title, value: value, formatter: UIFormatters.decimal)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity)
+
+                Stepper(
+                    title,
+                    value: SteppedValue.binding(value, range: range),
+                    step: step
+                )
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+            }
         }
-        .font(.system(size: 12))
+    }
+}
+
+struct CompactColorField: View {
+    let title: String
+    let selection: Binding<Color>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            ColorPicker(title, selection: selection, supportsOpacity: true)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

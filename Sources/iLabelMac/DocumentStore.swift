@@ -8,14 +8,20 @@ private let cachedQuickTextPresetsKey = "iLabel2Mac.cachedQuickTextPresets"
 private let cachedAppearanceModeKey = "iLabel2Mac.cachedAppearanceMode"
 let quickTextInsertNotification = Notification.Name("iLabel2Mac.quickTextInsert")
 let textStyleActionNotification = Notification.Name("iLabel2Mac.textStyleAction")
+let showEmojiPickerNotification = Notification.Name("iLabel2Mac.showEmojiPicker")
 
 enum TextStyleAction: Equatable {
     case bold
     case italic
     case underline
+    case strikethrough
+    case superscript
+    case subscriptText
     case fontFamily(String)
     case fontSize(Double)
     case textColor(RGBAColor)
+    case highlightColor(RGBAColor)
+    case clearFormatting
 }
 
 /// Carries a style action to the active inline editor. Notification posting
@@ -28,6 +34,101 @@ final class TextStyleActionRequest {
 
     init(_ action: TextStyleAction) {
         self.action = action
+    }
+}
+
+enum RichTextFormatting {
+    static let superscriptAttribute = NSAttributedString.Key.superscript
+
+    static func applyingAdvancedAction(
+        _ action: TextStyleAction,
+        to attributes: [NSAttributedString.Key: Any],
+        baseFont: NSFont,
+        baseForeground: NSColor,
+        alignment: NSTextAlignment,
+        baseUnderline: Bool
+    ) -> [NSAttributedString.Key: Any] {
+        var updated = attributes
+        switch action {
+        case .strikethrough:
+            let current = integerValue(attributes[.strikethroughStyle])
+            updated[.strikethroughStyle] = current == 0
+                ? NSUnderlineStyle.single.rawValue
+                : 0
+        case .superscript:
+            let current = integerValue(attributes[superscriptAttribute])
+            updated[superscriptAttribute] = current == 1 ? 0 : 1
+        case .subscriptText:
+            let current = integerValue(attributes[superscriptAttribute])
+            updated[superscriptAttribute] = current == -1 ? 0 : -1
+        case .highlightColor(let color):
+            if color.alpha <= 0.001 {
+                updated.removeValue(forKey: .backgroundColor)
+            } else {
+                updated[.backgroundColor] = color.nsColor
+            }
+        case .clearFormatting:
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = alignment
+            updated = [
+                .font: baseFont,
+                .foregroundColor: baseForeground,
+                .paragraphStyle: paragraph,
+                .underlineStyle: baseUnderline ? NSUnderlineStyle.single.rawValue : 0
+            ]
+        default:
+            break
+        }
+        return updated
+    }
+
+    static func rewriting(
+        _ action: TextStyleAction,
+        rtfData: Data?,
+        content: String,
+        baseFont: NSFont,
+        baseForeground: NSColor,
+        alignment: NSTextAlignment,
+        baseUnderline: Bool
+    ) -> Data? {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        let fallbackAttributes: [NSAttributedString.Key: Any] = [
+            .font: baseFont,
+            .foregroundColor: baseForeground,
+            .paragraphStyle: paragraph,
+            .underlineStyle: baseUnderline ? NSUnderlineStyle.single.rawValue : 0
+        ]
+        let source: NSAttributedString
+        if let decoded = RTFDecodeCache.decode(rtfData), decoded.string == content {
+            source = decoded
+        } else {
+            source = NSAttributedString(string: content, attributes: fallbackAttributes)
+        }
+
+        let mutable = NSMutableAttributedString(attributedString: source)
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        guard fullRange.length > 0 else { return rtfData }
+        source.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
+            let updated = applyingAdvancedAction(
+                action,
+                to: attributes,
+                baseFont: baseFont,
+                baseForeground: baseForeground,
+                alignment: alignment,
+                baseUnderline: baseUnderline
+            )
+            mutable.setAttributes(updated, range: range)
+        }
+        return mutable.rtf(
+            from: fullRange,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        ) ?? rtfData
+    }
+
+    private static func integerValue(_ value: Any?) -> Int {
+        if let number = value as? NSNumber { return number.intValue }
+        return value as? Int ?? 0
     }
 }
 
@@ -245,6 +346,10 @@ final class DocumentStore: ObservableObject {
         }
         recordUndo(coalescingKey: "sheet")
         edit(&document.sheet)
+        document.formatCode = nil
+        document.formatFamily = nil
+        document.formatSourceURL = nil
+        document.formatPDFTemplateURL = nil
         document.clampElementsToSheet()
         clampCurrentPageIndex()
         schedulePreviewRefresh()
@@ -323,7 +428,22 @@ final class DocumentStore: ObservableObject {
 
     func insertQuickTextPreset(_ preset: String) {
         guard !preset.isEmpty else { return }
-        NotificationCenter.default.post(name: quickTextInsertNotification, object: preset)
+        guard let selectedElement,
+              selectedElement.type == .text
+                || selectedElement.type == .qrCode
+                || selectedElement.type == .code128 else {
+            statusMessage = "Select text, QR, or barcode content first"
+            return
+        }
+        if canvasMode == .label,
+           selectedElement.type == .text,
+           editingElementID == selectedElement.id {
+            NotificationCenter.default.post(name: quickTextInsertNotification, object: preset)
+        } else {
+            updateSelected { element in
+                element.content += preset
+            }
+        }
         statusMessage = "Inserted preset: \(preset)"
     }
 
@@ -439,6 +559,21 @@ final class DocumentStore: ObservableObject {
                 element.isItalic.toggle()
             case .underline:
                 element.isUnderline.toggle()
+            case .strikethrough, .superscript, .subscriptText, .highlightColor:
+                element.richTextRTF = RichTextFormatting.rewriting(
+                    action,
+                    rtfData: element.richTextRTF,
+                    content: element.content,
+                    baseFont: resolvedNSFont(
+                        name: element.fontName,
+                        size: CGFloat(element.fontSize),
+                        isBold: element.isBold,
+                        isItalic: element.isItalic
+                    ),
+                    baseForeground: element.foreground.nsColor,
+                    alignment: element.textAlignment.nsTextAlignment,
+                    baseUnderline: element.isUnderline
+                )
             case .fontFamily(let name):
                 element.fontName = name
                 // Rich-text runs carry their own family (per-selection fonts),
@@ -457,7 +592,35 @@ final class DocumentStore: ObservableObject {
                 // back to a single color the inspector fully controls.
                 element.foreground = color
                 element.richTextRTF = LabelElement.rewritingForegroundColor(of: element.richTextRTF, to: color)
+            case .clearFormatting:
+                element.isBold = false
+                element.isItalic = false
+                element.isUnderline = false
+                element.richTextRTF = RichTextFormatting.rewriting(
+                    action,
+                    rtfData: element.richTextRTF,
+                    content: element.content,
+                    baseFont: resolvedNSFont(
+                        name: element.fontName,
+                        size: CGFloat(element.fontSize),
+                        isBold: false,
+                        isItalic: false
+                    ),
+                    baseForeground: element.foreground.nsColor,
+                    alignment: element.textAlignment.nsTextAlignment,
+                    baseUnderline: false
+                )
             }
+        }
+    }
+
+    func showEmojiPicker() {
+        guard let selectedElement, selectedElement.type == .text else { return }
+        canvasMode = .label
+        selectElement(selectedElement.id, beginEditing: true)
+        statusMessage = "Emoji & Symbols"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: showEmojiPickerNotification, object: nil)
         }
     }
 
@@ -465,6 +628,7 @@ final class DocumentStore: ObservableObject {
         guard let selectedElement, selectedElement.type == .text else { return }
         updateSelected { element in
             if vertical {
+                element.usesCircularTextFlow = false
                 let widthFactor: Double
                 let heightFactor: Double
                 switch document.sheet.shape {
@@ -485,6 +649,29 @@ final class DocumentStore: ObservableObject {
                 element.frame.height = targetHeight
                 element.frame.x = max(0, (document.sheet.labelWidthMM - targetWidth) / 2)
                 element.frame.y = max(0, (document.sheet.labelHeightMM - targetHeight) / 2)
+            } else if element.verticalTextLayout == true {
+                let targetWidth: Double
+                let targetHeight: Double
+                switch document.sheet.shape {
+                case .circle:
+                    targetWidth = document.sheet.labelWidthMM
+                    targetHeight = document.sheet.labelHeightMM
+                    element.usesCircularTextFlow = true
+                case .capsule:
+                    targetWidth = max(10, document.sheet.labelWidthMM * 0.90)
+                    targetHeight = max(8, document.sheet.labelHeightMM * 0.82)
+                    element.usesCircularTextFlow = false
+                case .rectangle, .roundedRectangle:
+                    targetWidth = max(10, document.sheet.labelWidthMM * 0.90)
+                    targetHeight = max(8, document.sheet.labelHeightMM * 0.78)
+                    element.usesCircularTextFlow = false
+                }
+                element.frame = RectMM(
+                    x: max(0, (document.sheet.labelWidthMM - targetWidth) / 2),
+                    y: max(0, (document.sheet.labelHeightMM - targetHeight) / 2),
+                    width: targetWidth,
+                    height: targetHeight
+                )
             }
 
             element.rotation = 0
