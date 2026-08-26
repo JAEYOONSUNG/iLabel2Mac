@@ -1,0 +1,18 @@
+{
+  "mac": {
+    "version": "0.3.0",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.0/iLabel-Studio-macOS.dmg",
+    "sha256": "baf0a10ca518862a024de1331c1f5719dfa0861822eb142bb6a625f84e7c5484",
+    "notes": "New editor layout, click-to-type, selection highlights, and in-app updates."
+  },
+  "win": {
+    "version": "0.3.0",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.0/iLabel-Studio-0.3.0-windows-x64-setup.exe",
+    "notes": "New editor layout, click-to-type, selection highlights, and in-app updates."
+  },
+  "linux": {
+    "version": "0.3.0",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.0/iLabel-Studio-0.3.0-linux-x86_64.AppImage",
+    "notes": "New editor layout, click-to-type, selection highlights, and in-app updates."
+  }
+}
