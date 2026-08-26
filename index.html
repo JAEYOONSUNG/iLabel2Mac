@@ -179,6 +179,8 @@
   .tier p { font-size: 15px; color: var(--body); margin: 8px 0 22px; }
   .tier.emph p { color: #D4D4D8; }
   .tier .btn { align-self: flex-start; margin-top: auto; }
+  .tier .btn-row { margin-top: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+  .tier .btn-row .btn { margin-top: 0; align-self: auto; }
   .fineprint { color: var(--soft); font-size: 13px; margin-top: 18px; }
 
   /* ---------- faq ---------- */
@@ -320,11 +322,14 @@
     <div class="tier">
       <span class="os">Windows &amp; Linux</span>
       <span class="name">Desktop edition</span>
-      <p>Grab the latest packaged build from GitHub Actions: NSIS or portable EXE for Windows, AppImage or DEB for Linux.</p>
-      <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Get from Actions</a>
+      <p>Direct download of the latest build, packaged on every commit: NSIS installer and portable EXE for Windows, AppImage and DEB for Linux.</p>
+      <div class="btn-row">
+        <a class="btn btn-dark" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip">Download for Windows</a>
+        <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip">Download for Linux</a>
+      </div>
     </div>
   </div>
-  <p class="fineprint">Development Windows builds are unsigned, so SmartScreen may show a warning. The Linux AppImage ships inside a tar.gz so its executable permission survives download.</p>
+  <p class="fineprint">Windows and Linux zips are packaged by GitHub Actions from the latest main commit. Development Windows builds are unsigned, so SmartScreen may show a warning. The Linux AppImage ships inside a tar.gz so its executable permission survives download.</p>
 </section>
 
 <section id="faq" class="container">

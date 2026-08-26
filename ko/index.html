@@ -181,6 +181,8 @@
   .tier p { font-size: 15px; color: var(--body); margin: 8px 0 22px; }
   .tier.emph p { color: #D4D4D8; }
   .tier .btn { align-self: flex-start; margin-top: auto; }
+  .tier .btn-row { margin-top: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+  .tier .btn-row .btn { margin-top: 0; align-self: auto; }
   .fineprint { color: var(--soft); font-size: 13px; margin-top: 18px; }
 
   /* ---------- faq ---------- */
@@ -322,11 +324,14 @@
     <div class="tier">
       <span class="os">Windows &amp; Linux</span>
       <span class="name">데스크톱 에디션</span>
-      <p>GitHub Actions에서 최신 패키지 빌드를 받으세요. Windows는 NSIS 설치본 또는 포터블 EXE, Linux는 AppImage 또는 DEB입니다.</p>
-      <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/actions/workflows/desktop.yml">Actions에서 받기</a>
+      <p>커밋마다 패키징되는 최신 빌드를 바로 내려받으세요. Windows는 NSIS 설치본과 포터블 EXE, Linux는 AppImage와 DEB가 들어 있습니다.</p>
+      <div class="btn-row">
+        <a class="btn btn-dark" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip">Windows용 다운로드</a>
+        <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip">Linux용 다운로드</a>
+      </div>
     </div>
   </div>
-  <p class="fineprint">개발용 Windows 빌드는 서명되어 있지 않아 SmartScreen 경고가 표시될 수 있습니다. Linux AppImage는 실행 권한이 다운로드 후에도 유지되도록 tar.gz로 포장되어 있습니다.</p>
+  <p class="fineprint">Windows·Linux zip은 main 브랜치 최신 커밋에서 GitHub Actions가 패키징한 빌드입니다. 개발용 Windows 빌드는 서명되어 있지 않아 SmartScreen 경고가 표시될 수 있습니다. Linux AppImage는 실행 권한이 다운로드 후에도 유지되도록 tar.gz로 포장되어 있습니다.</p>
 </section>
 
 <section id="faq" class="container">
