@@ -20,7 +20,8 @@ export type RichTextAction =
   | { kind: "underline" }
   | { kind: "fontFamily"; value: string }
   | { kind: "fontSize"; value: number }
-  | { kind: "foreground"; value: RGBAColor };
+  | { kind: "foreground"; value: RGBAColor }
+  | { kind: "highlight"; value: RGBAColor | undefined };
 
 export interface RichTextEditorHandle {
   applyAction(action: RichTextAction): boolean;
@@ -73,6 +74,7 @@ function stylesEqual(left: RTFStyleRun, right: RTFStyleRun): boolean {
     italic: left.italic,
     underline: left.underline,
     foreground: left.foreground,
+    background: left.background,
   }) === JSON.stringify({
     fontName: right.fontName,
     fontSize: right.fontSize,
@@ -80,6 +82,7 @@ function stylesEqual(left: RTFStyleRun, right: RTFStyleRun): boolean {
     italic: right.italic,
     underline: right.underline,
     foreground: right.foreground,
+    background: right.background,
   });
 }
 
@@ -106,6 +109,7 @@ function appendRun(
 function computedRun(
   element: HTMLElement,
   fontScale: number,
+  editorRoot?: HTMLElement,
 ): Omit<RTFStyleRun, "start" | "length"> {
   const computed = getComputedStyle(element);
   const numericWeight = Number.parseInt(computed.fontWeight, 10);
@@ -121,7 +125,24 @@ function computedRun(
     italic: /italic|oblique/i.test(computed.fontStyle),
     underline: computed.textDecorationLine.includes("underline"),
     foreground: colorFromCSS(computed.color),
+    background: effectiveBackground(element, editorRoot),
   };
+}
+
+/* Backgrounds do not inherit in computed style, so a bolded stretch nested
+   inside a highlighted span reports "transparent" at the leaf — the highlight
+   lives on an ancestor. Walk up to the editor root to find it. */
+function effectiveBackground(
+  element: HTMLElement,
+  editorRoot?: HTMLElement,
+): RGBAColor | undefined {
+  let node: HTMLElement | null = element;
+  while (node && node !== editorRoot) {
+    const parsed = colorFromCSS(getComputedStyle(node).backgroundColor);
+    if (parsed && parsed.alpha > 0.001) return parsed;
+    node = node.parentElement;
+  }
+  return undefined;
 }
 
 function editableChildren(container: HTMLElement): Node[] {
@@ -159,7 +180,7 @@ export function collectEditorValue(
     if (!value) return;
     const start = text.length;
     text += value;
-    appendRun(runs, start, value.length, computedRun(styleElement, fontScale));
+    appendRun(runs, start, value.length, computedRun(styleElement, fontScale, editor));
   };
 
   const visit = (node: Node, parentStyle: HTMLElement): void => {
@@ -221,6 +242,7 @@ function populateEditor(
     span.style.fontStyle = run.italic ? "italic" : "normal";
     span.style.textDecoration = run.underline ? "underline" : "none";
     span.style.color = colorCSS(run.foreground ?? element.foreground) ?? "black";
+    if (run.background) span.style.backgroundColor = colorCSS(run.background) ?? "transparent";
     const value = rich.text.slice(run.start, run.start + run.length);
     const pieces = value.split("\n");
     pieces.forEach((piece, index) => {
@@ -387,6 +409,13 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(
             break;
           case "foreground":
             document.execCommand("foreColor", false, colorCSS(action.value) ?? "#000000");
+            break;
+          case "highlight":
+            document.execCommand(
+              "hiliteColor",
+              false,
+              action.value ? colorCSS(action.value) ?? "transparent" : "transparent",
+            );
             break;
           case "fontSize": {
             const styledRange = applyFontSizeToRange(

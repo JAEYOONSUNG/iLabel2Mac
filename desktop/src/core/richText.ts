@@ -35,6 +35,7 @@ function styleKey(run: RTFStyleRun): string {
     italic: run.italic,
     underline: run.underline,
     foreground: run.foreground && colorKey(run.foreground),
+    background: run.background && colorKey(run.background),
   });
 }
 
@@ -115,6 +116,7 @@ export function elementRichText(element: LabelElement): ResolvedRichText {
         foreground: keepSelectionColors
           ? { ...(candidate.foreground ?? fallback.foreground!) }
           : { ...element.foreground },
+        ...(candidate.background ? { background: { ...candidate.background } } : {}),
       });
       cursor = end;
     }
@@ -192,5 +194,6 @@ export function runStyleAt(
     italic: run.italic,
     underline: run.underline,
     foreground: run.foreground && { ...run.foreground },
+    background: run.background && { ...run.background },
   } : {};
 }

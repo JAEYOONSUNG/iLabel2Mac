@@ -18,6 +18,8 @@ export interface RTFStyleRun {
   italic?: boolean;
   underline?: boolean;
   foreground?: RGBAColor;
+  /** Selection highlight; absent means no highlight. */
+  background?: RGBAColor;
 }
 
 export interface RTFParseResult {
@@ -41,6 +43,7 @@ interface ParserStyle {
   italic: boolean;
   underline: boolean;
   colorIndex?: number;
+  backgroundIndex?: number;
 }
 
 interface ParserState extends ParserStyle {
@@ -153,6 +156,7 @@ function cloneStyle(state: ParserStyle): ParserStyle {
     italic: state.italic,
     underline: state.underline,
     colorIndex: state.colorIndex,
+    backgroundIndex: state.backgroundIndex,
   };
 }
 
@@ -163,7 +167,8 @@ function sameParserStyle(left: ParserStyle, right: ParserStyle): boolean {
     left.bold === right.bold &&
     left.italic === right.italic &&
     left.underline === right.underline &&
-    left.colorIndex === right.colorIndex
+    left.colorIndex === right.colorIndex &&
+    left.backgroundIndex === right.backgroundIndex
   );
 }
 
@@ -749,6 +754,14 @@ function parseInternal(
       case "cf":
         state.colorIndex = parameter !== undefined && parameter > 0 ? parameter : undefined;
         break;
+      case "cb":
+        // Cocoa reserves colortbl slot 1 for the plain white page and returns
+        // to it to end a highlight, so 0 and 1 both read as "none".
+        state.backgroundIndex = parameter !== undefined && parameter > 1 ? parameter : undefined;
+        break;
+      case "highlight":
+        state.backgroundIndex = parameter !== undefined && parameter > 0 ? parameter : undefined;
+        break;
       case "plain":
         state.fontIndex = defaultFontIndex;
         state.fontSize = undefined;
@@ -756,6 +769,7 @@ function parseInternal(
         state.italic = false;
         state.underline = false;
         state.colorIndex = undefined;
+        state.backgroundIndex = undefined;
         break;
       case "uc":
         if (parameter !== undefined && parameter >= 0) {
@@ -823,6 +837,8 @@ function parseInternal(
       fontIndex === undefined ? undefined : fonts.get(fontIndex)?.name.trim() || undefined;
     const foreground =
       run.style.colorIndex === undefined ? undefined : colors[run.style.colorIndex];
+    const background =
+      run.style.backgroundIndex === undefined ? undefined : colors[run.style.backgroundIndex];
     return {
       start: run.start,
       length: run.length,
@@ -836,6 +852,7 @@ function parseInternal(
       italic: run.style.italic,
       underline: run.style.underline,
       ...(foreground ? { foreground: normalizedColor(foreground) } : {}),
+      ...(background ? { background: normalizedColor(background) } : {}),
     };
   });
 
@@ -884,6 +901,7 @@ interface SerializableStyle {
   italic: boolean;
   underline: boolean;
   foreground?: RGBAColor;
+  background?: RGBAColor;
 }
 
 interface SerializableSegment {
@@ -899,7 +917,8 @@ function sameSerializableStyle(left: SerializableStyle, right: SerializableStyle
     left.bold === right.bold &&
     left.italic === right.italic &&
     left.underline === right.underline &&
-    colorsEqual(left.foreground, right.foreground)
+    colorsEqual(left.foreground, right.foreground) &&
+    colorsEqual(left.background, right.background)
   );
 }
 
@@ -916,6 +935,7 @@ function normalizeRunStyle(run: RTFStyleRun): SerializableStyle {
     italic: run.italic === true,
     underline: run.underline === true,
     ...(run.foreground ? { foreground: normalizedColor(run.foreground) } : {}),
+    ...(run.background ? { background: normalizedColor(run.background) } : {}),
   };
 }
 
@@ -969,6 +989,7 @@ function serializableSegments(
       style.italic = run.style.italic;
       style.underline = run.style.underline;
       if (run.style.foreground !== undefined) style.foreground = run.style.foreground;
+      if (run.style.background !== undefined) style.background = run.style.background;
     }
     const previous = segments.at(-1);
     if (previous && previous.end === start && sameSerializableStyle(previous.style, style)) {
@@ -1029,14 +1050,16 @@ export function serializeRTF(text: string, runs: readonly RTFStyleRun[]): string
         fontNames.push(fontName);
       }
     }
-    const foreground = segment.style.foreground;
-    if (foreground) {
-      const color = normalizedColor(foreground);
+    for (const role of [segment.style.foreground, segment.style.background]) {
+      if (!role) continue;
+      const color = normalizedColor(role);
       const key = [color.red, color.green, color.blue, color.alpha]
         .map((component) => Math.round(component * 100_000))
         .join(":");
       if (!colorIndices.has(key)) {
-        colorIndices.set(key, colors.length + 1);
+        // Slot 1 stays reserved for Cocoa's plain white page, so real colors
+        // start at 2 and \cb1 keeps meaning "no highlight" everywhere.
+        colorIndices.set(key, colors.length + 2);
         colors.push(color);
       }
     }
@@ -1051,12 +1074,12 @@ export function serializeRTF(text: string, runs: readonly RTFStyleRun[]): string
     rtf += "}";
   }
   if (colors.length > 0) {
-    rtf += "{\\colortbl;";
+    rtf += "{\\colortbl;\\red255\\green255\\blue255;";
     for (const color of colors) {
       rtf += `\\red${Math.round(color.red * 255)}\\green${Math.round(color.green * 255)}\\blue${Math.round(color.blue * 255)};`;
     }
     rtf += "}";
-    rtf += "{\\*\\expandedcolortbl;";
+    rtf += "{\\*\\expandedcolortbl;;";
     for (const color of colors) {
       rtf += `\\csgenericrgb\\c${Math.round(color.red * 100_000)}\\c${Math.round(color.green * 100_000)}\\c${Math.round(color.blue * 100_000)}\\c${Math.round(color.alpha * 100_000)};`;
     }
@@ -1080,6 +1103,13 @@ export function serializeRTF(text: string, runs: readonly RTFStyleRun[]): string
         .map((component) => Math.round(component * 100_000))
         .join(":");
       controls.push(`\\cf${colorIndices.get(key)!}`);
+    }
+    if (segment.style.background) {
+      const color = normalizedColor(segment.style.background);
+      const key = [color.red, color.green, color.blue, color.alpha]
+        .map((component) => Math.round(component * 100_000))
+        .join(":");
+      controls.push(`\\cb${colorIndices.get(key)!}`);
     }
     rtf += `{${controls.join("")}${controls.length > 0 ? " " : ""}${encodeRTFText(
       safeText.slice(segment.start, segment.end),

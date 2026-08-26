@@ -34,6 +34,20 @@ function editorFixture(html: string): HTMLDivElement {
 }
 
 describe("contenteditable text collection", () => {
+  it("collects a highlight and keeps it through nested styling", () => {
+    const editor = editorFixture(
+      '<span style="background-color: rgb(255, 214, 51)">lit <b>bold</b></span><span>plain</span>',
+    );
+    const { runs, text } = collectEditorValue(editor, 1);
+    expect(text).toBe("lit boldplain");
+    const at = (index: number) =>
+      runs.find((run) => index >= run.start && index < run.start + run.length);
+    expect(at(0)?.background?.red).toBeCloseTo(1, 2);
+    expect(at(text.indexOf("bold"))?.background?.green).toBeCloseTo(214 / 255, 2);
+    expect(at(text.indexOf("plain"))?.background).toBeUndefined();
+    editor.remove();
+  });
+
   it("drops Chromium caret placeholder breaks when the editor is empty", () => {
     const editor = editorFixture("<br>");
     expect(collectEditorValue(editor, 1).text).toBe("");

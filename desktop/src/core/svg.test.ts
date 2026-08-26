@@ -146,6 +146,29 @@ describe("renderLabelSVG", () => {
     expect(svg).toContain('data-text-length="6"');
   });
 
+  it("paints highlight boxes behind highlighted runs and only there", () => {
+    const text = makeElement("text");
+    text.frame = { x: 0, y: 0, width: 50, height: 20 };
+    text.content = "plain lit";
+    text.richTextRTF = serializeBase64RTF(text.content, [
+      { start: 0, length: 6, fontName: "Arial", fontSize: 10 },
+      { start: 6, length: 3, fontName: "Arial", fontSize: 10, background: { red: 1, green: 0.84, blue: 0.2, alpha: 1 } },
+    ]);
+    const document = documentWith([text]);
+
+    const svg = renderLabelSVG(document, ACTIVE_CONTEXT, { now: NOW });
+
+    const highlights = svg.match(/data-role="text-highlights"/g) ?? [];
+    expect(highlights).toHaveLength(1);
+    expect(svg).toMatch(/data-role="text-highlights"[^>]*>\s*<rect [^>]*fill="#ffd633"/);
+
+    text.richTextRTF = serializeBase64RTF(text.content, [
+      { start: 0, length: 9, fontName: "Arial", fontSize: 10 },
+    ]);
+    const plain = renderLabelSVG(documentWith([text]), ACTIVE_CONTEXT, { now: NOW });
+    expect(plain).not.toContain("text-highlights");
+  });
+
   it("uses the actual rich-text run size for line height and centering", () => {
     const text = makeElement("text");
     text.frame = { x: 0, y: 0, width: 50, height: 20 };
