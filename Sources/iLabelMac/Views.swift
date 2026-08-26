@@ -146,6 +146,9 @@ struct ContentView: View {
             }
         }
         .background(appChromeBackground())
+        .overlay(alignment: .bottomTrailing) {
+            UpdateBannerView()
+        }
     }
 }
 

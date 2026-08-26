@@ -48,6 +48,23 @@ const api = Object.freeze({
   waitForPrintDrain: (request: PrintDrainRequest) => ipcRenderer.invoke("output:wait-for-print-drain", request),
   getOSInfo: () => ipcRenderer.invoke("system:os-info"),
   setTheme: (theme: "light" | "dark" | "system") => ipcRenderer.invoke("system:set-theme", theme),
+  updates: Object.freeze({
+    state: () => ipcRenderer.invoke("update:state"),
+    download: () => ipcRenderer.invoke("update:download"),
+    install: () => ipcRenderer.invoke("update:install"),
+    skip: (version: string) => ipcRenderer.invoke("update:skip", version),
+    openDownloads: () => ipcRenderer.invoke("update:open-downloads"),
+    onAvailable: (listener: (offer: unknown) => void) => {
+      const handler = (_event: unknown, offer: unknown) => listener(offer);
+      ipcRenderer.on("update:available", handler);
+      return () => ipcRenderer.removeListener("update:available", handler);
+    },
+    onProgress: (listener: (progress: unknown) => void) => {
+      const handler = (_event: unknown, progress: unknown) => listener(progress);
+      ipcRenderer.on("update:progress", handler);
+      return () => ipcRenderer.removeListener("update:progress", handler);
+    },
+  }),
   wifi: Object.freeze({
     getStatus: () => ipcRenderer.invoke("wifi:status"),
     test: (request: WifiTestRequest) => ipcRenderer.invoke("wifi:test", request),

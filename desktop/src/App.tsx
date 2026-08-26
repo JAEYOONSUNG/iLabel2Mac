@@ -48,6 +48,7 @@ import { rasterPixelSize, setPNGDataURLDPI } from "./core/png";
 import { coordinatePrinterNetwork } from "./core/printCoordinator";
 import { elementRichText } from "./core/richText";
 import { serializeBase64RTF } from "./core/rtf";
+import UpdateBanner from "./components/UpdateBanner";
 import RichTextEditor, {
   type RichTextAction,
   type RichTextEditorHandle,
@@ -2628,6 +2629,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <UpdateBanner />
       <header className="toolbar" aria-label="Application toolbar">
         <div className="toolbar-group">
           <button onClick={newProject}>New</button>

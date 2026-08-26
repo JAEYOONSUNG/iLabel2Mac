@@ -16,6 +16,18 @@ Open the DMG, drag `iLabel Studio.app` to `Applications`, then launch it.
 
 Upgrading from the former `iLabel2Mac.app`? Quit the old app, install `iLabel Studio.app`, then remove the old app bundle. Existing projects and saved app preferences remain compatible.
 
+## Releasing and auto-update
+
+One command cuts a release for every platform:
+
+```bash
+node tools/release.mjs patch    # or minor, major, x.y.z; --dry to preview
+```
+
+It refuses a dirty tree or a failing suite, bumps the version, pushes tag `vX.Y.Z`, and waits for [the Release workflow](.github/workflows/release.yml) to build the macOS DMG and the Windows/Linux packages into one GitHub release. Only then does it point `feed.json` on `gh-pages` at the new version and verify everything is publicly reachable — the feed moves last so no copy of the app is ever told about a build it cannot download.
+
+Installed copies check that feed on launch (and every six hours) and offer the update as an in-app card — nothing downloads until the person says so. The Windows installer and the Linux AppImage install through electron-updater; the macOS app downloads the DMG itself, verifies it against the SHA-256 the feed pins, swaps its bundle, and relaunches. Only the portable Windows build and `.deb` installs are handed the download instead.
+
 ## Install on Windows and Linux
 
 Windows and Linux packages are built from [`desktop/`](desktop/):
