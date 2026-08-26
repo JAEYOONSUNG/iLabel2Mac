@@ -112,9 +112,18 @@
         "AppImage",
         "deb"
       ]
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "JAEYOONSUNG",
+        "repo": "iLabel-Studio",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
-    "pdf-lib": "1.17.1"
+    "pdf-lib": "1.17.1",
+    "electron-updater": "^6.8.9"
   }
 }
