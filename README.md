@@ -1,5 +1,7 @@
 # iLabel Studio
 
+**🌐 Homepage: [jaeyoonsung.github.io/iLabel-Studio](https://jaeyoonsung.github.io/iLabel-Studio/)** · [한국어](https://jaeyoonsung.github.io/iLabel-Studio/ko/)
+
 <img width="5128" height="2830" alt="iLabel Studio label editor" src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" />
 
 `iLabel Studio` is a cross-platform precision label editor and printer built around **iLabel label sheets from `label.kr`**, while also supporting custom sheets and roll labels. It ships as a native SwiftUI app on macOS and as a feature-equivalent Electron app on Windows and Linux. Every edition shares the same project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.
