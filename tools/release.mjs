@@ -20,7 +20,9 @@
    gh-pages, and verifies the result is publicly reachable. It refuses to start
    on a dirty tree or a failing suite, because a release is the one build
    nobody can take back. */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,8 +107,19 @@ const pick = (test, label) => {
   if (!name) die(`No ${label} asset in ${tag}: ${assets.join(", ")}`);
   return url(name);
 };
+/* The Mac updater swaps its own bundle, so the feed pins the DMG's SHA-256 —
+   the checksum from this HTTPS origin is what vouches for the bytes. */
+step("Fingerprint the DMG");
+const hashDir = mkdtempSync(join(tmpdir(), "ilabel-release-"));
+run("gh", ["release", "download", tag, "--repo", SLUG, "--pattern", "*.dmg", "--dir", hashDir]);
+const dmgName = readdirSync(hashDir).find((n) => n.endsWith(".dmg"));
+if (!dmgName) die("The release's DMG could not be fetched for fingerprinting.");
+const dmgSha256 = createHash("sha256").update(readFileSync(join(hashDir, dmgName))).digest("hex");
+rmSync(hashDir, { recursive: true, force: true });
+say(`   sha256 ${dmgSha256}`);
+
 const feed = {
-  mac: { version, url: pick((n) => n.endsWith(".dmg"), "DMG"), notes },
+  mac: { version, url: pick((n) => n.endsWith(".dmg"), "DMG"), sha256: dmgSha256, notes },
   win: { version, url: pick((n) => n.endsWith("-setup.exe"), "Windows setup"), notes },
   linux: { version, url: pick((n) => n.endsWith(".AppImage"), "AppImage"), notes },
 };

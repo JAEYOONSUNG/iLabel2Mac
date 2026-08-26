@@ -157,6 +157,16 @@ export interface ILabelDesktopAPI {
   waitForPrintDrain(request: PrintDrainRequest): Promise<IPCResult<PrintDrainData>>;
   getOSInfo(): Promise<IPCResult<OSInfo>>;
   setTheme(theme: "light" | "dark" | "system"): Promise<IPCResult<"light" | "dark" | "system">>;
+  updates: {
+    /** The offer announced this session, if any — for components that mount late. */
+    state(): Promise<UpdateOffer | null>;
+    download(): Promise<UpdateDownloadResult>;
+    install(): Promise<void>;
+    skip(version: string): Promise<void>;
+    openDownloads(): Promise<void>;
+    onAvailable(listener: (offer: UpdateOffer) => void): () => void;
+    onProgress(listener: (progress: UpdateProgress) => void): () => void;
+  };
   wifi: {
     getStatus(): Promise<IPCResult<WifiStatus>>;
     test(request: WifiTestRequest): Promise<IPCResult<WifiTestData>>;
@@ -164,6 +174,24 @@ export interface ILabelDesktopAPI {
     restore(sessionToken: string): Promise<IPCResult<WifiRestoreData>>;
   };
 }
+
+export interface UpdateOffer {
+  version: string;
+  notes: string;
+  url: string;
+  current: string;
+  /** Whether this copy can replace itself (installer/AppImage) or must be
+      handed the download (portable, deb). */
+  self: boolean;
+}
+
+export interface UpdateProgress {
+  percent: number;
+}
+
+export type UpdateDownloadResult =
+  | { status: "success" }
+  | { status: "error"; error: { code: string; message: string } };
 
 declare global {
   interface Window {

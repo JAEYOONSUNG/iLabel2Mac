@@ -14,7 +14,7 @@ struct iLabelMacApp: App {
                     // SSIDs) unless the app has Location Services access, so
                     // Wi-Fi printing needs this granted once.
                     LocationPermission.shared.requestIfNeeded()
-                    UpdateChecker.checkSoon()
+                    UpdateChecker.shared.checkSoon()
                 }
         }
         .windowResizability(.contentMinSize)

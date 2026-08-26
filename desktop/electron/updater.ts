@@ -1,4 +1,4 @@
-import { app, dialog, shell, type BrowserWindow } from "electron";
+import { app, ipcMain, shell, type BrowserWindow } from "electron";
 import { get } from "node:https";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,8 +7,10 @@ import path from "node:path";
    newest version per platform. Checking it is the only outbound request the
    updater makes without being asked; the actual download happens through
    electron-updater against the GitHub release, and only after the person says
-   so — asked for, never assumed. */
-const FEED_URL = "https://jaeyoonsung.github.io/iLabel-Studio/feed.json";
+   so — asked for, never assumed. The asking itself happens in the renderer,
+   which draws the offer in the app's own design instead of an OS dialog. */
+const FEED_URL = process.env.ILABEL_UPDATE_FEED
+  || "https://jaeyoonsung.github.io/iLabel-Studio/feed.json";
 const RELEASES_URL = "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest";
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
@@ -16,6 +18,16 @@ interface FeedEntry {
   version: string;
   url: string;
   notes?: string;
+}
+
+export interface UpdateOffer {
+  version: string;
+  notes: string;
+  url: string;
+  current: string;
+  /** Whether this copy can replace itself (installer/AppImage) or must be
+      handed the download (portable, deb). */
+  self: boolean;
 }
 
 /** `1.1.34` against `1.1.9`: compared as numbers, field by field, because
@@ -70,8 +82,7 @@ function fetchFeed(url: string): Promise<Record<string, FeedEntry>> {
 /* On Linux the format decides, not the platform: an AppImage is one file and
    electron-updater replaces it in place. A `.deb` belongs to the package
    manager, and the Windows portable build has no installer to hand over to —
-   both are told how they are updated instead of offered a button that cannot
-   finish. */
+   both are handed the download instead of a button that cannot finish. */
 function selfUpdating(): boolean {
   if (!app.isPackaged) return false;
   if (process.platform === "win32") return !process.env.PORTABLE_EXECUTABLE_DIR;
@@ -96,105 +107,12 @@ async function writeSkippedVersion(version: string): Promise<void> {
   try {
     await writeFile(prefsPath(), JSON.stringify({ skip: version }), "utf8");
   } catch {
-    // a missed preference write only means one extra prompt later
+    // a missed preference write only means one extra offer later
   }
 }
 
-function showBox(
-  window: BrowserWindow | null,
-  options: Electron.MessageBoxOptions,
-): Promise<Electron.MessageBoxReturnValue> {
-  if (window && !window.isDestroyed()) return dialog.showMessageBox(window, options);
-  return dialog.showMessageBox(options);
-}
-
-let promptedThisSession = "";
-
-async function promptAndInstall(
-  window: BrowserWindow | null,
-  entry: FeedEntry,
-): Promise<void> {
-  const detail = [
-    `You have ${app.getVersion()}.`,
-    entry.notes ? `\n${entry.notes}` : "",
-    "\nThe update is downloaded from the project's GitHub release and installed when you restart.",
-  ].join("");
-  const ask = await showBox(window, {
-    type: "info",
-    message: `iLabel Studio ${entry.version} is available`,
-    detail,
-    buttons: ["Install Update", "Later", "Skip This Version"],
-    defaultId: 0,
-    cancelId: 1,
-  });
-  if (ask.response === 2) {
-    await writeSkippedVersion(entry.version);
-    return;
-  }
-  if (ask.response !== 0) return;
-
-  try {
-    const { autoUpdater } = await import("electron-updater");
-    autoUpdater.autoDownload = false; // asked for, never assumed
-    autoUpdater.autoInstallOnAppQuit = true; // consent was just given
-    autoUpdater.logger = null;
-    /* A hundred megabytes with nothing on screen reads as frozen — the dock or
-       taskbar progress bar is where the percentage lives. */
-    autoUpdater.on("download-progress", (progress) => {
-      if (window && !window.isDestroyed()) {
-        window.setProgressBar(Math.max(0, (progress?.percent || 0) / 100));
-      }
-    });
-    const downloaded = new Promise<void>((resolve, reject) => {
-      autoUpdater.once("update-downloaded", () => resolve());
-      autoUpdater.once("error", (error) => reject(error));
-    });
-    await autoUpdater.checkForUpdates();
-    await autoUpdater.downloadUpdate();
-    await downloaded;
-    if (window && !window.isDestroyed()) window.setProgressBar(-1);
-    const restart = await showBox(window, {
-      type: "info",
-      message: `iLabel Studio ${entry.version} is ready`,
-      detail: "Restart now to finish installing, or keep working — it installs when you quit.",
-      buttons: ["Restart Now", "Later"],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (restart.response === 0) autoUpdater.quitAndInstall();
-  } catch (error) {
-    if (window && !window.isDestroyed()) window.setProgressBar(-1);
-    const failed = await showBox(window, {
-      type: "warning",
-      message: "The update could not be installed",
-      detail: `${String((error as Error)?.message || error)}\n\nYou can download it yourself instead.`,
-      buttons: ["Open Downloads Page", "Close"],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (failed.response === 0) void shell.openExternal(entry.url || RELEASES_URL);
-  }
-}
-
-async function tellHowToUpdate(
-  window: BrowserWindow | null,
-  entry: FeedEntry,
-): Promise<void> {
-  const how =
-    process.platform === "linux"
-      ? "This copy was installed from a package, so your package manager owns it — update it the way it was installed, or switch to the AppImage build, which updates itself."
-      : "This is the portable build, which has no installer to hand over to — download the new portable file and replace this one, or switch to the installer build, which updates itself.";
-  const ask = await showBox(window, {
-    type: "info",
-    message: `iLabel Studio ${entry.version} is available`,
-    detail: `You have ${app.getVersion()}.\n\n${how}`,
-    buttons: ["Open Downloads Page", "Later", "Skip This Version"],
-    defaultId: 0,
-    cancelId: 1,
-  });
-  if (ask.response === 0) void shell.openExternal(entry.url || RELEASES_URL);
-  if (ask.response === 2) await writeSkippedVersion(entry.version);
-}
+let offer: UpdateOffer | null = null;
+let offeredThisSession = "";
 
 async function checkForUpdate(window: BrowserWindow | null): Promise<void> {
   let feed: Record<string, FeedEntry>;
@@ -206,11 +124,69 @@ async function checkForUpdate(window: BrowserWindow | null): Promise<void> {
   const key = process.platform === "win32" ? "win" : "linux";
   const entry = feed[key];
   if (!entry?.version || !newerVersion(entry.version, app.getVersion())) return;
-  if (entry.version === promptedThisSession) return;
+  if (entry.version === offeredThisSession) return;
   if (entry.version === (await readSkippedVersion())) return;
-  promptedThisSession = entry.version;
-  if (selfUpdating()) await promptAndInstall(window, entry);
-  else await tellHowToUpdate(window, entry);
+  offeredThisSession = entry.version;
+  offer = {
+    version: entry.version,
+    notes: String(entry.notes || ""),
+    url: String(entry.url || ""),
+    current: app.getVersion(),
+    self: selfUpdating(),
+  };
+  if (window && !window.isDestroyed()) {
+    window.webContents.send("update:available", offer);
+  }
+}
+
+type UpdateResult = { status: "success" } | { status: "error"; error: { code: string; message: string } };
+
+async function downloadUpdate(window: BrowserWindow | null): Promise<UpdateResult> {
+  try {
+    const { autoUpdater } = await import("electron-updater");
+    autoUpdater.autoDownload = false; // asked for, never assumed
+    autoUpdater.autoInstallOnAppQuit = true; // consent was just given
+    autoUpdater.logger = null;
+    /* A hundred megabytes with nothing on screen reads as frozen — the banner
+       shows the percentage, and the dock or taskbar mirrors it. */
+    autoUpdater.on("download-progress", (progress) => {
+      const percent = Math.max(0, Math.round(progress?.percent || 0));
+      if (window && !window.isDestroyed()) {
+        window.setProgressBar(percent / 100);
+        window.webContents.send("update:progress", { percent });
+      }
+    });
+    const downloaded = new Promise<void>((resolve, reject) => {
+      autoUpdater.once("update-downloaded", () => resolve());
+      autoUpdater.once("error", (error) => reject(error));
+    });
+    await autoUpdater.checkForUpdates();
+    await autoUpdater.downloadUpdate();
+    await downloaded;
+    if (window && !window.isDestroyed()) window.setProgressBar(-1);
+    return { status: "success" };
+  } catch (error) {
+    if (window && !window.isDestroyed()) window.setProgressBar(-1);
+    return {
+      status: "error",
+      error: { code: "update-download-failed", message: String((error as Error)?.message || error) },
+    };
+  }
+}
+
+export function registerUpdateIPC(getWindow: () => BrowserWindow | null): void {
+  ipcMain.handle("update:state", () => offer);
+  ipcMain.handle("update:download", () => downloadUpdate(getWindow()));
+  ipcMain.handle("update:install", async () => {
+    const { autoUpdater } = await import("electron-updater");
+    autoUpdater.quitAndInstall();
+  });
+  ipcMain.handle("update:skip", async (_event, version: unknown) => {
+    await writeSkippedVersion(String(version || ""));
+  });
+  ipcMain.handle("update:open-downloads", () => {
+    void shell.openExternal(offer?.url || RELEASES_URL);
+  });
 }
 
 /* A launch is the moment to look — somebody who quits and reopens after a

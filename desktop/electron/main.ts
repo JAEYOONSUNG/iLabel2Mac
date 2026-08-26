@@ -17,7 +17,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
-import { scheduleUpdateChecks } from "./updater";
+import { registerUpdateIPC, scheduleUpdateChecks } from "./updater";
 
 type Success<T> = { status: "success"; data: T };
 type Cancelled = { status: "cancelled" };
@@ -1220,6 +1220,7 @@ void app.whenReady().then(() => {
   registerRendererProtocol();
   configureRendererPermissions();
   registerIPC();
+  registerUpdateIPC(() => mainWindow);
   mainWindow = createMainWindow();
   scheduleUpdateChecks(() => mainWindow);
   app.on("activate", () => {
