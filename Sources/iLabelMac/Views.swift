@@ -1031,7 +1031,14 @@ struct TextFormattingToolbar: View {
                         selection: Binding(
                             get: { store.selectedElement?.foreground.color ?? .black },
                             set: { store.applyTextStyleAction(.textColor(RGBAColor($0))) }
-                        )
+                        ),
+                        clearHelp: "Reset Text Color",
+                        // Back to the element's own color: a selection loses its
+                        // accent, and element-wide the runs are repainted to base.
+                        onClear: {
+                            store.applyTextStyleAction(
+                                .textColor(store.selectedElement?.foreground ?? .black))
+                        }
                     )
 
                     toolbarColorWell(
@@ -1042,7 +1049,9 @@ struct TextFormattingToolbar: View {
                                 highlightColor = color
                                 store.applyTextStyleAction(.highlightColor(RGBAColor(color)))
                             }
-                        )
+                        ),
+                        clearHelp: "Remove Highlight",
+                        onClear: { store.applyTextStyleAction(.highlightColor(.clear)) }
                     )
 
                     Button {
@@ -1090,15 +1099,29 @@ struct TextFormattingToolbar: View {
 
     private func toolbarColorWell(
         title: String,
-        selection: Binding<Color>
+        selection: Binding<Color>,
+        clearHelp: String,
+        onClear: @escaping () -> Void
     ) -> some View {
         VStack(spacing: 1) {
             Text(title)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(.secondary)
-            ColorPicker(title, selection: selection, supportsOpacity: true)
-                .labelsHidden()
-                .frame(width: 28)
+            HStack(spacing: 2) {
+                ColorPicker(title, selection: selection, supportsOpacity: true)
+                    .labelsHidden()
+                    .frame(width: 28)
+                // The slash is the way back out: pickers can only ever choose
+                // *a* color, so removing one needs its own control.
+                Button(action: onClear) {
+                    Image(systemName: "nosign")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(clearHelp)
+                .accessibilityLabel(clearHelp)
+            }
         }
         .help(title)
     }
