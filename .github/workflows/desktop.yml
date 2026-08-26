@@ -85,12 +85,14 @@ jobs:
           test -f "$asar_path"
           node -e '
             const asar = require("@electron/asar");
-            for (const file of ["dist/index.html", "dist-electron/main.js", "dist-electron/preload.js"]) {
+            for (const file of ["dist/index.html", "dist-electron/main.js", "dist-electron/preload.js", "dist-electron/updater.js", "node_modules/electron-updater/package.json"]) {
               if (asar.extractFile(process.argv[1], file).length === 0) {
                 throw new Error(`Empty packaged file: ${file}`);
               }
             }
           ' "$asar_path"
+          # electron-updater is inert without its packaged feed pointer
+          test -f "$(dirname "$asar_path")/app-update.yml"
 
       - name: Smoke test Windows package
         if: runner.os == 'Windows'
