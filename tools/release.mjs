@@ -20,9 +20,8 @@
    gh-pages, and verifies the result is publicly reachable. It refuses to start
    on a dirty tree or a failing suite, because a release is the one build
    nobody can take back. */
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,8 +76,30 @@ else {
   runLoud("npm", ["test"], { cwd: join(repo, "desktop") });
 }
 
+/* The DMG is built, signed, and notarized here — Apple credentials live in
+   this keychain, not in CI. Failing notarization aborts before the tag ever
+   becomes public. */
+step("Build the notarized DMG");
+if (dry) { say(`(dry) would notarize, tag ${tag}, and push`); process.exit(0); }
+const identities = run("security", ["find-identity", "-v", "-p", "codesigning"]);
+const identity = identities.match(/Developer ID Application: [^"]+/)?.[0];
+if (!identity) die("No Developer ID Application identity in the keychain; a release DMG must be signed.");
+const profile = process.env.ILABEL_NOTARY_PROFILE
+  || ["ilabel", "genestudio"].find((candidate) => {
+    try {
+      run("xcrun", ["notarytool", "history", "--keychain-profile", candidate,
+        "--output-format", "json"]);
+      return true;
+    } catch { return false; }
+  });
+if (!profile) die("No notary keychain profile answers; store one with `xcrun notarytool store-credentials`.");
+say(`   ${identity} · profile ${profile}`);
+runLoud("bash", [join(repo, "scripts/package_dmg.sh")], {
+  env: { ...process.env, APP_VERSION: version, SIGN_IDENTITY: identity, NOTARY_PROFILE: profile },
+});
+const dmgPath = join(repo, "dist/iLabel-Studio-macOS.dmg");
+
 step("Version, tag, push");
-if (dry) { say(`(dry) would tag ${tag} and push`); process.exit(0); }
 if (version !== current) {
   runLoud("npm", ["version", "--no-git-tag-version", version], { cwd: join(repo, "desktop") });
   runLoud("git", ["add", "desktop/package.json", "desktop/package-lock.json"]);
@@ -102,6 +123,9 @@ for (let i = 0; i < 120; i += 1) { // up to ~60 minutes
 }
 if (conclusion !== "success") die(`The Release workflow did not succeed (${conclusion || "never finished"}). The feed was not moved.`);
 
+step("Upload the notarized DMG");
+runLoud("gh", ["release", "upload", tag, dmgPath, "--repo", SLUG, "--clobber"]);
+
 step("Read the published assets");
 const assets = JSON.parse(run("gh", ["api", `repos/${SLUG}/releases/tags/${tag}`,
   "--jq", "[.assets[].name]"]));
@@ -114,12 +138,7 @@ const pick = (test, label) => {
 /* The Mac updater swaps its own bundle, so the feed pins the DMG's SHA-256 —
    the checksum from this HTTPS origin is what vouches for the bytes. */
 step("Fingerprint the DMG");
-const hashDir = mkdtempSync(join(tmpdir(), "ilabel-release-"));
-run("gh", ["release", "download", tag, "--repo", SLUG, "--pattern", "*.dmg", "--dir", hashDir]);
-const dmgName = readdirSync(hashDir).find((n) => n.endsWith(".dmg"));
-if (!dmgName) die("The release's DMG could not be fetched for fingerprinting.");
-const dmgSha256 = createHash("sha256").update(readFileSync(join(hashDir, dmgName))).digest("hex");
-rmSync(hashDir, { recursive: true, force: true });
+const dmgSha256 = createHash("sha256").update(readFileSync(dmgPath)).digest("hex");
 say(`   sha256 ${dmgSha256}`);
 
 const feed = {

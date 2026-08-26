@@ -68,6 +68,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep -s - "$APP_DIR" >/dev/null
+# Ad-hoc by default; a real identity (SIGN_IDENTITY) gets the hardened
+# runtime and a secure timestamp, which notarization requires.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  codesign --force --deep -s - "$APP_DIR" >/dev/null
+else
+  codesign --force --deep --options runtime --timestamp -s "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
+fi
 
 echo "Built $APP_DIR"

@@ -7,27 +7,10 @@ on:
 permissions:
   contents: write
 
+# The macOS DMG is built, signed, and notarized locally by tools/release.mjs,
+# which uploads it to the same release — Apple credentials never leave that
+# machine's keychain.
 jobs:
-  macos:
-    name: macOS DMG
-    runs-on: macos-14
-    timeout-minutes: 40
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Package DMG
-        env:
-          APP_VERSION: ${{ github.ref_name }}
-        run: |
-          export APP_VERSION="${APP_VERSION#v}"
-          ./scripts/package_dmg.sh
-
-      - name: Upload DMG to the release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/iLabel-Studio-macOS.dmg
-
   desktop:
     name: ${{ matrix.name }}
     strategy:

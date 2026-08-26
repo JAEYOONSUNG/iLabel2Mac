@@ -14,6 +14,18 @@ trap cleanup EXIT
 
 "$ROOT_DIR/scripts/build_app.sh"
 
+# With a notary profile the app is notarized and stapled before the DMG is
+# built, so the copy a person drags out verifies even offline.
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+  NOTARY_ZIP="$STAGING_DIR/notarize.zip"
+  ditto -c -k --keepParent "$APP_DIR" "$NOTARY_ZIP"
+  xcrun notarytool submit "$NOTARY_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  rm -f "$NOTARY_ZIP"
+  xcrun stapler staple "$APP_DIR" >/dev/null
+  spctl --assess --type execute "$APP_DIR"
+  echo "Notarized and stapled $APP_DIR"
+fi
+
 mkdir -p "$STAGING_DIR"
 cp -R "$APP_DIR" "$STAGING_DIR/"
 ln -s /Applications "$STAGING_DIR/Applications"
