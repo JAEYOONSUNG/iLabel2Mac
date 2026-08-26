@@ -663,20 +663,28 @@ try {
     const field = [...document.querySelectorAll('.field-label')]
       .find((label) => label.querySelector('span')?.textContent.trim() === 'Highlight');
     if (!field) throw new Error('The Highlight swatch is missing.');
-    const input = field.querySelector('input[type="color"]');
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setter.call(input, '#ffd633');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    // The swatch starts at "no highlight"; its Use toggle is the real one-click
+    // way a person turns the default yellow on.
+    const use = [...field.querySelectorAll('button')]
+      .find((button) => button.textContent.trim() === 'Use');
+    if (!use) throw new Error('The Highlight swatch has no Use toggle.');
+    use.click();
     return true;
   })()`);
   await delay(400);
   const highlighted = await evaluate(`(() => {
     const rects = [...document.querySelectorAll('.label-board .svg-surface [data-role="text-highlights"] rect')];
-    return { count: rects.length, fill: rects[0]?.getAttribute('fill') };
+    const editor = document.querySelector('.rich-text-editor');
+    const propsKey = editor ? Object.keys(editor).find((key) => key.startsWith('__reactProps')) : null;
+    const rtf = propsKey ? editor[propsKey]?.element?.richTextRTF ?? null : null;
+    return {
+      count: rects.length,
+      fill: rects[0]?.getAttribute('fill'),
+      rtfCarriesBackground: typeof rtf === 'string' ? atob(rtf).includes('\\cb') : null,
+    };
   })()`);
   assert(
-    highlighted.count > 0 && highlighted.fill === "#ffd633",
+    highlighted.count > 0 && highlighted.fill === "#ffd633" && highlighted.rtfCarriesBackground === true,
     `The highlight never reached the rendered label: ${JSON.stringify(highlighted)}`,
   );
   await evaluate(`(() => {
