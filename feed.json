@@ -1,18 +1,18 @@
 {
   "mac": {
-    "version": "0.3.1",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.1/iLabel-Studio-macOS.dmg",
-    "sha256": "0fd556439bbb2900ebc2ed07f18586e0263125cf47b64c9e10043c67dcefeb5e",
-    "notes": "Signed and notarized macOS build, polished color controls, and updater fixes."
+    "version": "0.3.2",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-macOS.dmg",
+    "sha256": "9101474f0e50e368db8604e9d0770cc2beaaca0bbb6b969ccb9f52834e96515d",
+    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
   },
   "win": {
-    "version": "0.3.1",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.1/iLabel-Studio-0.3.1-windows-x64-setup.exe",
-    "notes": "Signed and notarized macOS build, polished color controls, and updater fixes."
+    "version": "0.3.2",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-0.3.2-windows-x64-setup.exe",
+    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
   },
   "linux": {
-    "version": "0.3.1",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.1/iLabel-Studio-0.3.1-linux-x86_64.AppImage",
-    "notes": "Signed and notarized macOS build, polished color controls, and updater fixes."
+    "version": "0.3.2",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-0.3.2-linux-x86_64.AppImage",
+    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
   }
 }
