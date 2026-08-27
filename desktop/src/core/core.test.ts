@@ -17,6 +17,7 @@ import officialFormatPayload from "../../../Resources/official_formats.json";
 import { CSVParseError, parseCSV } from "./csv";
 import {
   DocumentCoreError,
+  beginBatchEdit,
   captureBatch,
   clampDocumentElements,
   clearBatches,
@@ -31,6 +32,7 @@ import {
   pageCount,
   removeBatch,
   renderPayload,
+  repositionBatch,
   selectPlacementStart,
   visiblePreviewSlotIndices,
 } from "./document";
@@ -401,6 +403,140 @@ describe("capture queue and fixed placement", () => {
     const removed = removeBatch(moved, batches[1]!.id);
     expect(removed.printQueue?.map((batch) => batch.name)).toEqual(["One"]);
     expect(clearBatches(removed).printQueue).toBeUndefined();
+  });
+
+  it("checks a captured batch out for editing and re-captures it in place", () => {
+    let document = testDocument();
+    document.serial.end = 2;
+    document.elements[0]!.content = "FIRST {{serial}}";
+    document = captureBatch(document, 0, {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    document.elements[0]!.content = "SECOND {{serial}}";
+    document = selectPlacementStart(document, 2, 0);
+    document = captureBatch(document, 0, {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+
+    const edit = beginBatchEdit(document, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(edit.queueIndex).toBe(0);
+    expect(edit.batch.startPageIndex).toBe(0);
+    expect(edit.document.elements[0]?.content).toBe("FIRST {{serial}}");
+    expect(edit.document.serial.end).toBe(2);
+    expect(edit.document.printQueue?.map((batch) => batch.id)).toEqual([
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    // The edited batch's slots are free again while it is checked out.
+    expect(renderPayload(edit.document, 0, 0).batchID).toBeUndefined();
+    // Editing must not mutate its input document.
+    expect(document.printQueue).toHaveLength(2);
+
+    let updated = edit.document;
+    updated.elements[0]!.content = "FIRST v2 {{serial}}";
+    updated = captureBatch(updated, edit.batch.startPageIndex ?? 0, {
+      id: edit.batch.id,
+      startSlotOffset: edit.batch.startSlotOffset,
+      insertIndex: edit.queueIndex,
+    });
+    expect(updated.printQueue?.map((batch) => batch.id)).toEqual([
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    expect(renderPayload(updated, 0, 0)).toMatchObject({
+      batchID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    expect(updated.printQueue?.[0]?.elements[0]?.content).toBe("FIRST v2 {{serial}}");
+    expect(renderPayload(updated, 2, 0).batchID).toBe(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+  });
+
+  it("editing a legacy batch freezes the queue and keeps its exact offsets", () => {
+    const document = testDocument();
+    document.printQueue = [
+      {
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        name: "First",
+        quantity: 3,
+        elements: [{ ...document.elements[0]!, content: "FIRST" }],
+      },
+      {
+        id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        name: "Second",
+        quantity: 3,
+        elements: [{ ...document.elements[0]!, content: "SECOND" }],
+      },
+    ];
+
+    const edit = beginBatchEdit(document, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    expect(edit.batch).toMatchObject({
+      startPageIndex: 0,
+      startSlotOffset: 3,
+      legacySequenceOffset: 3,
+    });
+    expect(edit.document.elements[0]?.content).toBe("SECOND");
+
+    const updated = captureBatch(edit.document, edit.batch.startPageIndex ?? 0, {
+      id: edit.batch.id,
+      startSlotOffset: edit.batch.startSlotOffset,
+      insertIndex: edit.queueIndex,
+    });
+    // The physical slots stay frozen; the batch now numbers itself like any
+    // modern capture instead of sharing the legacy continuous sequence.
+    expect(renderPayload(updated, 3, 0).batchID).toBe(
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    );
+    expect(renderPayload(updated, 0, 1)).toMatchObject({
+      batchID: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      context: { rowNumber: 2 },
+    });
+  });
+
+  it("repositions a captured batch to a new slot and page in place", () => {
+    let document = testDocument();
+    document.serial.end = 2;
+    document.elements[0]!.content = "FIRST {{serial}}";
+    document = captureBatch(document, 0, {
+      id: "12121212-1212-4121-8121-121212121212",
+    });
+    document.elements[0]!.content = "SECOND {{serial}}";
+    document = selectPlacementStart(document, 2, 0);
+    document = captureBatch(document, 0, {
+      id: "34343434-3434-4343-8343-343434343434",
+    });
+
+    // Same page: move the first capture from slots 0–1 into the free slot
+    // window that starts right where the sheet still has room on page 1.
+    const moved = repositionBatch(document, "12121212-1212-4121-8121-121212121212", 0, 1);
+    expect(moved.printQueue?.map((batch) => batch.id)).toEqual([
+      "12121212-1212-4121-8121-121212121212",
+      "34343434-3434-4343-8343-343434343434",
+    ]);
+    expect(renderPayload(moved, 0, 0).batchID).toBeUndefined();
+    expect(renderPayload(moved, 0, 1)).toMatchObject({
+      batchID: "12121212-1212-4121-8121-121212121212",
+      context: { serialValue: 1 },
+    });
+    expect(moved.printQueue?.[0]?.elements[0]?.content).toBe("FIRST {{serial}}");
+    // The second capture never moves.
+    expect(renderPayload(moved, 2, 0).batchID).toBe(
+      "34343434-3434-4343-8343-343434343434",
+    );
+
+    // Landing on another batch's fixed slots is rejected.
+    expect(() =>
+      repositionBatch(document, "12121212-1212-4121-8121-121212121212", 2, 0),
+    ).toThrowError(expect.objectContaining({ code: "placementConflict" }));
+    expect(() =>
+      repositionBatch(document, "56565656-5656-4565-8565-565656565656", 0, 1),
+    ).toThrowError(expect.objectContaining({ code: "unknownBatch" }));
+  });
+
+  it("rejects editing a batch that is not in the queue", () => {
+    const document = testDocument();
+    expect(() =>
+      beginBatchEdit(document, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+    ).toThrowError(expect.objectContaining({ code: "unknownBatch" }));
   });
 
   it("enforces the total 100,000-label queue limit", () => {

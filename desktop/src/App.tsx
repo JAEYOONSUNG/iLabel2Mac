@@ -17,7 +17,9 @@ import {
   makeElement,
 } from "./defaults";
 import {
+  type CaptureBatchOptions,
   DocumentCoreError,
+  beginBatchEdit,
   captureBatch,
   clearBatches,
   clearPlacementSelection,
@@ -32,6 +34,7 @@ import {
   pageCount,
   removeBatch,
   renderPayload,
+  repositionBatch,
   selectPlacementRect,
   selectPlacementStart,
   updatePlacementFillDirection,
@@ -659,7 +662,14 @@ interface NumberingQueueProps {
   canCapture: boolean;
   onSerialField: <K extends keyof LabelDocument["serial"]>(key: K, value: LabelDocument["serial"][K]) => void;
   onFillDirection: (value: LabelDocument["placement"]["fillDirection"]) => void;
+  editingCaptureName?: string;
+  movingCaptureID?: string;
+  movingCaptureName?: string;
   onCapture: () => void;
+  onEditBatch: (id: string) => void;
+  onCancelEditBatch: () => void;
+  onBeginMoveBatch: (id: string) => void;
+  onCancelMoveBatch: () => void;
   onRemoveBatch: (id: string) => void;
   onMoveBatch: (id: string, offset: number) => void;
   onResetQueue: () => void;
@@ -671,9 +681,16 @@ function NumberingQueue({
   captureIssue,
   captureHint,
   canCapture,
+  editingCaptureName,
+  movingCaptureID,
+  movingCaptureName,
   onSerialField,
   onFillDirection,
   onCapture,
+  onEditBatch,
+  onCancelEditBatch,
+  onBeginMoveBatch,
+  onCancelMoveBatch,
   onRemoveBatch,
   onMoveBatch,
   onResetQueue,
@@ -738,7 +755,23 @@ function NumberingQueue({
             <span>Current setup</span>
             <strong>{setupCount.toLocaleString()} label(s)</strong>
           </div>
-          <button className="primary" disabled={!canCapture} onClick={onCapture}>Capture Current Setup</button>
+          {editingCaptureName ? (
+            <div className="button-row">
+              <button className="primary" disabled={!canCapture} onClick={onCapture}>Update Capture</button>
+              <button onClick={onCancelEditBatch}>Cancel Edit</button>
+            </div>
+          ) : (
+            <button className="primary" disabled={!canCapture} onClick={onCapture}>Capture Current Setup</button>
+          )}
+          {editingCaptureName && (
+            <div className="capture-hint">Editing “{editingCaptureName}”. Update Capture applies your changes back to its queue position.</div>
+          )}
+          {movingCaptureName && (
+            <div className="button-row">
+              <span className="capture-hint">Moving “{movingCaptureName}”. Click an empty label position on the sheet preview.</span>
+              <button onClick={onCancelMoveBatch}>Cancel Move</button>
+            </div>
+          )}
           {captureIssue && <div className="toast-error">{captureIssue}</div>}
           {!captureIssue && captureHint && <div className="capture-hint">{captureHint}</div>}
 
@@ -757,6 +790,8 @@ function NumberingQueue({
                       <span>{batch.quantity.toLocaleString()} labels · page {(batch.startPageIndex ?? 0) + 1}</span>
                     </span>
                     <span className="queue-actions">
+                      <button aria-label="Edit capture" title="Load this capture back into the editor" disabled={Boolean(editingCaptureName)} onClick={() => onEditBatch(batch.id)}>✎</button>
+                      <button aria-label="Reposition capture" title="Move this capture to a new sheet position" className={movingCaptureID === batch.id ? "active" : undefined} disabled={Boolean(editingCaptureName)} onClick={() => onBeginMoveBatch(batch.id)}>⌖</button>
                       <button aria-label="Move capture earlier" disabled={index === 0} onClick={() => onMoveBatch(batch.id, -1)}>↑</button>
                       <button aria-label="Move capture later" disabled={index === batches.length - 1} onClick={() => onMoveBatch(batch.id, 1)}>↓</button>
                       <button className="danger" aria-label="Remove capture" onClick={() => onRemoveBatch(batch.id)}>×</button>
@@ -804,7 +839,14 @@ interface InspectorProps {
   onTestWiFi: () => void;
   onSerialField: NumberingQueueProps["onSerialField"];
   onFillDirection: NumberingQueueProps["onFillDirection"];
+  editingCaptureName?: string;
+  movingCaptureID?: string;
+  movingCaptureName?: string;
   onCapture: () => void;
+  onEditBatch: NumberingQueueProps["onEditBatch"];
+  onCancelEditBatch: NumberingQueueProps["onCancelEditBatch"];
+  onBeginMoveBatch: NumberingQueueProps["onBeginMoveBatch"];
+  onCancelMoveBatch: NumberingQueueProps["onCancelMoveBatch"];
   onRemoveBatch: NumberingQueueProps["onRemoveBatch"];
   onMoveBatch: NumberingQueueProps["onMoveBatch"];
   onResetQueue: () => void;
@@ -837,7 +879,14 @@ function Inspector({
   onTestWiFi,
   onSerialField,
   onFillDirection,
+  editingCaptureName,
+  movingCaptureID,
+  movingCaptureName,
   onCapture,
+  onEditBatch,
+  onCancelEditBatch,
+  onBeginMoveBatch,
+  onCancelMoveBatch,
   onRemoveBatch,
   onMoveBatch,
   onResetQueue,
@@ -871,9 +920,16 @@ function Inspector({
             captureIssue={captureIssue}
             captureHint={captureHint}
             canCapture={canCapture}
+            editingCaptureName={editingCaptureName}
+            movingCaptureID={movingCaptureID}
+            movingCaptureName={movingCaptureName}
             onSerialField={onSerialField}
             onFillDirection={onFillDirection}
             onCapture={onCapture}
+            onEditBatch={onEditBatch}
+            onCancelEditBatch={onCancelEditBatch}
+            onBeginMoveBatch={onBeginMoveBatch}
+            onCancelMoveBatch={onCancelMoveBatch}
             onRemoveBatch={onRemoveBatch}
             onMoveBatch={onMoveBatch}
             onResetQueue={onResetQueue}
@@ -1527,7 +1583,14 @@ function Editor({
   onResetArea,
   onSerialField,
   onFillDirection,
+  editingCaptureName,
+  movingCaptureID,
+  movingCaptureName,
   onCapture,
+  onEditBatch,
+  onCancelEditBatch,
+  onBeginMoveBatch,
+  onCancelMoveBatch,
   onRemoveBatch,
   onMoveBatch,
   onResetQueue,
@@ -1609,9 +1672,16 @@ function Editor({
                     captureIssue={captureIssue}
                     captureHint={captureHint}
                     canCapture={canCapture}
+                    editingCaptureName={editingCaptureName}
+                    movingCaptureID={movingCaptureID}
+                    movingCaptureName={movingCaptureName}
                     onSerialField={onSerialField}
                     onFillDirection={onFillDirection}
                     onCapture={onCapture}
+                    onEditBatch={onEditBatch}
+                    onCancelEditBatch={onCancelEditBatch}
+                    onBeginMoveBatch={onBeginMoveBatch}
+                    onCancelMoveBatch={onCancelMoveBatch}
                     onRemoveBatch={onRemoveBatch}
                     onMoveBatch={onMoveBatch}
                     onResetQueue={onResetQueue}
@@ -1645,6 +1715,17 @@ interface RegisteredEmbeddedFont {
   names: readonly string[];
 }
 
+/** Bookkeeping while a captured batch is checked out of the queue for editing. */
+interface CaptureEditSession {
+  id: string;
+  name: string;
+  queueIndex: number;
+  startPageIndex: number;
+  startSlotOffset: number;
+  /** Snapshot from before the edit began, so Cancel restores the queue untouched. */
+  previous: HistorySnapshot;
+}
+
 function App() {
   const [document, setDocument] = useState<LabelDocument>(() => createInitialDocument());
   const documentRef = useRef(document);
@@ -1675,6 +1756,8 @@ function App() {
   const pendingPageRef = useRef<number | undefined>(0);
   const [status, setStatus] = useState("Ready");
   const [captureIssue, setCaptureIssue] = useState<string>();
+  const [captureEdit, setCaptureEdit] = useState<CaptureEditSession>();
+  const [captureMove, setCaptureMove] = useState<{ id: string; name: string }>();
   const [busy, setBusy] = useState<string>();
   const [platform, setPlatform] = useState<string>();
   const [localFonts, setLocalFonts] = useState<LocalFontData[]>([]);
@@ -1916,6 +1999,8 @@ function App() {
     setDocument(previous.document);
     updatePendingPage(previous.pendingPage);
     setSelectedID((id) => previous.document.elements.some((element) => element.id === id) ? id : previous.document.elements[0]?.id);
+    setCaptureEdit(undefined);
+    setCaptureMove(undefined);
     setStatus("Undo");
     lastHistory.current = { time: 0 };
     setHistoryVersion((value) => value + 1);
@@ -1929,6 +2014,8 @@ function App() {
     setDocument(next.document);
     updatePendingPage(next.pendingPage);
     setSelectedID((id) => next.document.elements.some((element) => element.id === id) ? id : next.document.elements[0]?.id);
+    setCaptureEdit(undefined);
+    setCaptureMove(undefined);
     setStatus("Redo");
     lastHistory.current = { time: 0 };
     setHistoryVersion((value) => value + 1);
@@ -1956,6 +2043,8 @@ function App() {
     setCurrentPage(0);
     updatePendingPage(0);
     setCaptureIssue(undefined);
+    setCaptureEdit(undefined);
+    setCaptureMove(undefined);
     resetHistory();
     setStatus("Started a new label project");
   }, [catalog, resetHistory, updatePendingPage]);
@@ -1982,6 +2071,8 @@ function App() {
       setCurrentPage(0);
       updatePendingPage((loaded.printQueue?.length ?? 0) > 0 ? undefined : 0);
       setCaptureIssue(undefined);
+      setCaptureEdit(undefined);
+      setCaptureMove(undefined);
       resetHistory();
       setStatus(`Opened ${result.name}`);
     } catch (error) {
@@ -2327,7 +2418,26 @@ function App() {
     setStatus(documentRef.current.sheet.shape === "circle" ? "Fitted text to the full circular label" : "Centered text in the label");
   }, [updateSelected]);
 
+  const repositionCaptureTo = useCallback((slotIndex: number) => {
+    if (!captureMove) return;
+    try {
+      const targetPage = Math.max(0, currentPage);
+      const next = repositionBatch(documentRef.current, captureMove.id, slotIndex, targetPage);
+      replaceDocument(next, `Moved “${captureMove.name}” to page ${targetPage + 1}, slot ${slotIndex + 1}.`, true);
+      setCaptureMove(undefined);
+      setCaptureIssue(undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCaptureIssue(message);
+      setStatus(message);
+    }
+  }, [captureMove, currentPage, replaceDocument]);
+
   const selectSlot = useCallback((slotIndex: number) => {
+    if (captureMove) {
+      repositionCaptureTo(slotIndex);
+      return;
+    }
     try {
       const targetPage = Math.max(0, currentPage);
       const payload = renderPayload(documentRef.current, slotIndex, targetPage);
@@ -2346,9 +2456,13 @@ function App() {
       setCaptureIssue(message);
       setStatus(message);
     }
-  }, [currentPage, replaceDocument, updatePendingPage]);
+  }, [captureMove, currentPage, repositionCaptureTo, replaceDocument, updatePendingPage]);
 
   const selectSlotRange = useCallback((startSlot: number, endSlot: number) => {
+    if (captureMove) {
+      repositionCaptureTo(startSlot);
+      return;
+    }
     try {
       const targetPage = Math.max(0, currentPage);
       const next = selectPlacementRect(documentRef.current, startSlot, endSlot);
@@ -2370,7 +2484,7 @@ function App() {
       setCaptureIssue(message);
       setStatus(message);
     }
-  }, [currentPage, replaceDocument, updatePendingPage]);
+  }, [captureMove, currentPage, repositionCaptureTo, replaceDocument, updatePendingPage]);
 
   const resetPlacementArea = useCallback(() => {
     replaceDocument(
@@ -2389,8 +2503,26 @@ function App() {
         throw new Error("Choose an empty start position for the next capture.");
       }
       const quantity = currentSetupLabelCount(current);
-      const next = captureBatch(current, pendingPage ?? currentPage);
-      replaceDocument(next, `Captured ${quantity} label(s). Choose another empty position for the next capture.`, true);
+      const capturePage = pendingPage ?? captureEdit?.startPageIndex ?? currentPage;
+      const options: CaptureBatchOptions = {};
+      if (captureEdit) {
+        options.insertIndex = captureEdit.queueIndex;
+        if (!current.printQueue?.some((batch) => batch.id === captureEdit.id)) {
+          options.id = captureEdit.id;
+        }
+        if (capturePage === captureEdit.startPageIndex) {
+          options.startSlotOffset = captureEdit.startSlotOffset;
+        }
+      }
+      const next = captureBatch(current, capturePage, options);
+      replaceDocument(
+        next,
+        captureEdit
+          ? `Updated “${captureEdit.name}” with ${quantity} label(s).`
+          : `Captured ${quantity} label(s). Choose another empty position for the next capture.`,
+        true,
+      );
+      setCaptureEdit(undefined);
       updatePendingPage(undefined);
       setCaptureIssue(undefined);
     } catch (error) {
@@ -2398,13 +2530,86 @@ function App() {
       setCaptureIssue(message);
       setStatus(message);
     }
-  }, [currentPage, pendingPage, replaceDocument, updatePendingPage]);
+  }, [captureEdit, currentPage, pendingPage, replaceDocument, updatePendingPage]);
+
+  const editCapturedBatch = useCallback((id: string) => {
+    if (captureEdit) {
+      const message = `Finish editing “${captureEdit.name}” first — Update Capture or Cancel Edit.`;
+      setCaptureIssue(message);
+      setStatus(message);
+      return;
+    }
+    setCaptureMove(undefined);
+    try {
+      const previous: HistorySnapshot = {
+        document: clone(documentRef.current),
+        pendingPage: pendingPageRef.current,
+      };
+      const { document: next, batch, queueIndex } = beginBatchEdit(documentRef.current, id);
+      replaceDocument(next, `Editing “${batch.name}”. Adjust the setup, then Update Capture.`, true);
+      setSelectedID(next.elements[0]?.id);
+      setCaptureEdit({
+        id: batch.id,
+        name: batch.name,
+        queueIndex,
+        startPageIndex: batch.startPageIndex ?? 0,
+        startSlotOffset: batch.startSlotOffset ?? 0,
+        previous,
+      });
+      const page = batch.startPageIndex ?? 0;
+      updatePendingPage(page);
+      setCurrentPage(page);
+      setCaptureIssue(undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCaptureIssue(message);
+      setStatus(message);
+    }
+  }, [captureEdit, replaceDocument, updatePendingPage]);
+
+  const beginMoveCapturedBatch = useCallback((id: string) => {
+    if (captureEdit) {
+      const message = `Finish editing “${captureEdit.name}” first — Update Capture or Cancel Edit.`;
+      setCaptureIssue(message);
+      setStatus(message);
+      return;
+    }
+    if (captureMove?.id === id) {
+      setCaptureMove(undefined);
+      setStatus("Cancelled the capture move");
+      return;
+    }
+    const batch = documentRef.current.printQueue?.find((candidate) => candidate.id === id);
+    if (!batch) return;
+    setCaptureMove({ id, name: batch.name });
+    setCaptureIssue(undefined);
+    setStatus(`Click an empty label position to move “${batch.name}”. Use Prev/Next to reach another page.`);
+  }, [captureEdit, captureMove]);
+
+  const cancelMoveCapturedBatch = useCallback(() => {
+    if (!captureMove) return;
+    setCaptureMove(undefined);
+    setStatus("Cancelled the capture move");
+  }, [captureMove]);
+
+  const cancelCaptureEdit = useCallback(() => {
+    if (!captureEdit) return;
+    replaceDocument(
+      captureEdit.previous.document,
+      `Returned “${captureEdit.name}” to the queue unchanged.`,
+      true,
+    );
+    updatePendingPage(captureEdit.previous.pendingPage);
+    setCaptureEdit(undefined);
+    setCaptureIssue(undefined);
+  }, [captureEdit, replaceDocument, updatePendingPage]);
 
   const removeCapturedBatch = useCallback((id: string) => {
     const next = removeBatch(documentRef.current, id);
     replaceDocument(next, "Removed capture from the queue", true);
     if ((next.printQueue?.length ?? 0) === 0) updatePendingPage(currentPage);
     setCaptureIssue(undefined);
+    setCaptureMove((current) => (current?.id === id ? undefined : current));
   }, [currentPage, replaceDocument, updatePendingPage]);
 
   const moveCapturedBatch = useCallback((id: string, offset: number) => {
@@ -2416,6 +2621,8 @@ function App() {
     updatePendingPage(0);
     setCurrentPage(0);
     setCaptureIssue(undefined);
+    setCaptureEdit(undefined);
+    setCaptureMove(undefined);
   }, [replaceDocument, updatePendingPage]);
 
   const changeFillDirection = useCallback((value: LabelDocument["placement"]["fillDirection"]) => {
@@ -2720,7 +2927,14 @@ function App() {
           onResetArea={resetPlacementArea}
           onSerialField={serialField}
           onFillDirection={changeFillDirection}
+          editingCaptureName={captureEdit?.name}
+          movingCaptureID={captureMove?.id}
+          movingCaptureName={captureMove?.name}
           onCapture={captureCurrent}
+          onEditBatch={editCapturedBatch}
+          onCancelEditBatch={cancelCaptureEdit}
+          onBeginMoveBatch={beginMoveCapturedBatch}
+          onCancelMoveBatch={cancelMoveCapturedBatch}
           onRemoveBatch={removeCapturedBatch}
           onMoveBatch={moveCapturedBatch}
           onResetQueue={resetQueue}
@@ -2752,7 +2966,14 @@ function App() {
           onTestWiFi={() => void testWiFi()}
           onSerialField={serialField}
           onFillDirection={changeFillDirection}
+          editingCaptureName={captureEdit?.name}
+          movingCaptureID={captureMove?.id}
+          movingCaptureName={captureMove?.name}
           onCapture={captureCurrent}
+          onEditBatch={editCapturedBatch}
+          onCancelEditBatch={cancelCaptureEdit}
+          onBeginMoveBatch={beginMoveCapturedBatch}
+          onCancelMoveBatch={cancelMoveCapturedBatch}
           onRemoveBatch={removeCapturedBatch}
           onMoveBatch={moveCapturedBatch}
           onResetQueue={resetQueue}

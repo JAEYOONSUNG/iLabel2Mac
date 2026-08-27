@@ -154,6 +154,33 @@ final class DocumentStore: ObservableObject {
         didSet { persistAppearanceMode() }
     }
 
+    /// Bookkeeping while a captured batch is checked out of the queue for
+    /// editing: the next capture puts it back with the same identity, queue
+    /// position, and sheet slots. Mirrors the desktop edition.
+    struct PrintBatchEditSession {
+        let batchID: UUID
+        let batchName: String
+        let queueIndex: Int
+        let startPageIndex: Int
+        let startSlotOffset: Int
+        /// Snapshot from before the edit began, so Cancel restores the queue untouched.
+        let previousDocument: LabelDocument
+        let previousPendingDraftPageIndex: Int?
+        let previousCurrentPageIndex: Int
+    }
+
+    @Published private(set) var printBatchEditSession: PrintBatchEditSession?
+
+    /// Armed while the user is choosing a new sheet position for a captured
+    /// batch: the next slot click moves that batch instead of staging the
+    /// draft's start position. Mirrors the desktop edition.
+    struct PrintBatchMoveSession {
+        let batchID: UUID
+        let batchName: String
+    }
+
+    @Published private(set) var printBatchMoveSession: PrintBatchMoveSession?
+
     let officialFormats: [OfficialFormatDefinition]
     private var previewRefreshWorkItem: DispatchWorkItem?
     private var lastPreviewRefreshAt = Date.distantPast
@@ -333,6 +360,8 @@ final class DocumentStore: ObservableObject {
             self.selectedElementID = document.elements.first?.id
         }
         editingElementID = nil
+        printBatchEditSession = nil
+        printBatchMoveSession = nil
         persistPrintAutomationCache(document.printAutomation)
         clampCurrentPageIndex()
         refreshUndoState()
@@ -714,6 +743,10 @@ final class DocumentStore: ObservableObject {
         ensureLegacyQueueIsFrozen()
         let total = document.totalSlotCount
         guard slotIndex >= 0, slotIndex < total else { return }
+        if let session = printBatchMoveSession {
+            repositionPrintBatch(session, to: slotIndex)
+            return
+        }
         if document.hasQueuedLabels {
             let committed = document.renderPayload(
                 slotIndex: slotIndex,
@@ -742,6 +775,10 @@ final class DocumentStore: ObservableObject {
 
     func selectPlacementRect(from startSlot: Int, to endSlot: Int) {
         ensureLegacyQueueIsFrozen()
+        if let session = printBatchMoveSession {
+            repositionPrintBatch(session, to: min(startSlot, endSlot))
+            return
+        }
         let columns = document.sheet.columns
         let rows = document.sheet.rows
         guard columns > 0, rows > 0 else { return }
@@ -861,9 +898,22 @@ final class DocumentStore: ObservableObject {
             statusMessage = message
             return
         }
+        let editSession = printBatchEditSession
+        var batchID = UUID()
+        var startSlotOffset = 0
+        if let editSession {
+            if !snapshot.printBatches.contains(where: { $0.id == editSession.batchID }) {
+                batchID = editSession.batchID
+            }
+            // Only reuse the frozen offset when the batch returns to its page;
+            // a deliberately re-picked position starts at the area's beginning.
+            if capturePageIndex == editSession.startPageIndex {
+                startSlotOffset = editSession.startSlotOffset
+            }
+        }
         let batchNumber = snapshot.printBatches.count + 1
         let batch = PrintBatch(
-            id: UUID(),
+            id: batchID,
             name: printBatchName(elements: snapshot.elements, fallbackNumber: batchNumber),
             quantity: quantity,
             elements: snapshot.elements,
@@ -871,7 +921,7 @@ final class DocumentStore: ObservableObject {
             dataTable: snapshot.dataTable,
             capturedPlacement: snapshot.placement,
             startPageIndex: capturePageIndex,
-            startSlotOffset: 0
+            startSlotOffset: startSlotOffset
         )
 
         if let conflict = snapshot.firstPlacementConflict(for: batch) {
@@ -884,14 +934,166 @@ final class DocumentStore: ObservableObject {
 
         updateDocument(coalescingKey: nil) { document in
             var batches = document.printQueue ?? []
-            batches.append(batch)
+            let insertIndex = editSession.map { min($0.queueIndex, batches.count) } ?? batches.count
+            batches.insert(batch, at: insertIndex)
             document.printQueue = batches
         }
+        printBatchEditSession = nil
         pendingDraftPageIndex = nil
         captureQueueIssue = nil
         clampCurrentPageIndex()
         schedulePreviewRefresh(immediate: true)
-        statusMessage = "Captured \(batch.name) with \(quantity) label(s). Choose another empty position for the next capture."
+        statusMessage = editSession != nil
+            ? "Updated \(batch.name) with \(quantity) label(s)."
+            : "Captured \(batch.name) with \(quantity) label(s). Choose another empty position for the next capture."
+    }
+
+    /// Take a captured batch out of the queue and load its snapshot (label,
+    /// numbering/CSV, placement) back into the editor. The next capture puts
+    /// the updated setup back in the same queue position and sheet slots.
+    func beginEditingPrintBatch(id: UUID) {
+        if let session = printBatchEditSession {
+            let message = "Finish editing \(session.batchName) first — Update Capture or Cancel."
+            captureQueueIssue = message
+            statusMessage = message
+            return
+        }
+        printBatchMoveSession = nil
+        var snapshot = document
+        snapshot.freezeLegacyPrintQueuePlacement()
+        guard let queueIndex = snapshot.printBatches.firstIndex(where: { $0.id == id }) else {
+            statusMessage = "This capture is no longer in the queue."
+            return
+        }
+        let batch = snapshot.printBatches[queueIndex]
+        let session = PrintBatchEditSession(
+            batchID: batch.id,
+            batchName: batch.name,
+            queueIndex: queueIndex,
+            startPageIndex: batch.startPageIndex ?? 0,
+            startSlotOffset: batch.startSlotOffset ?? 0,
+            previousDocument: document,
+            previousPendingDraftPageIndex: pendingDraftPageIndex,
+            previousCurrentPageIndex: currentPageIndex
+        )
+
+        updateDocument(coalescingKey: nil) { document in
+            document.freezeLegacyPrintQueuePlacement()
+            var batches = document.printQueue ?? []
+            batches.removeAll { $0.id == id }
+            document.printQueue = batches.isEmpty ? nil : batches
+            document.elements = batch.elements
+            if let serial = batch.serialSettings {
+                document.serial = serial
+            }
+            document.dataTable = batch.dataTable
+            if let placement = batch.capturedPlacement {
+                document.placement = placement
+            }
+        }
+        printBatchEditSession = session
+        pendingDraftPageIndex = session.startPageIndex
+        currentPageIndex = session.startPageIndex
+        selectedElementID = document.elements.first?.id
+        editingElementID = nil
+        captureQueueIssue = nil
+        clampCurrentPageIndex()
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Editing \(batch.name). Adjust the setup, then Update Capture."
+    }
+
+    /// Abandon the current capture edit and put the original batch back.
+    func cancelPrintBatchEdit() {
+        guard let session = printBatchEditSession else { return }
+        recordUndo(coalescingKey: nil)
+        document = session.previousDocument
+        document.clampElementsToSheet()
+        printBatchEditSession = nil
+        pendingDraftPageIndex = session.previousPendingDraftPageIndex
+        currentPageIndex = session.previousCurrentPageIndex
+        selectedElementID = document.elements.first?.id
+        editingElementID = nil
+        captureQueueIssue = nil
+        clampCurrentPageIndex()
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Returned \(session.batchName) to the queue unchanged."
+    }
+
+    /// Arm reposition mode for a captured batch: the next click on the page
+    /// preview moves the batch's fixed slots there. Clicking the same batch's
+    /// button again cancels.
+    func beginMovingPrintBatch(id: UUID) {
+        if let session = printBatchEditSession {
+            let message = "Finish editing \(session.batchName) first — Update Capture or Cancel."
+            captureQueueIssue = message
+            statusMessage = message
+            return
+        }
+        if printBatchMoveSession?.batchID == id {
+            cancelPrintBatchMove()
+            return
+        }
+        ensureLegacyQueueIsFrozen()
+        guard let batch = document.printBatches.first(where: { $0.id == id }) else {
+            statusMessage = "This capture is no longer in the queue."
+            return
+        }
+        printBatchMoveSession = PrintBatchMoveSession(batchID: batch.id, batchName: batch.name)
+        captureQueueIssue = nil
+        statusMessage = "Click an empty label position to move \(batch.name). Use Prev/Next to reach another page."
+    }
+
+    func cancelPrintBatchMove() {
+        guard printBatchMoveSession != nil else { return }
+        printBatchMoveSession = nil
+        statusMessage = "Cancelled the capture move"
+    }
+
+    private func repositionPrintBatch(_ session: PrintBatchMoveSession, to slotIndex: Int) {
+        guard let queueIndex = document.printBatches.firstIndex(where: { $0.id == session.batchID }) else {
+            printBatchMoveSession = nil
+            statusMessage = "This capture is no longer in the queue."
+            return
+        }
+        var moved = document.printBatches[queueIndex]
+        let fillDirection = moved.capturedPlacement?.fillDirection
+            ?? document.placement.fillDirection
+        moved.capturedPlacement = PlacementSettings(
+            selectedSlotIndices: document.slotIndicesStarting(
+                at: slotIndex,
+                fillDirection: fillDirection
+            ),
+            fillDirection: fillDirection
+        )
+        moved.startPageIndex = currentPageIndex
+        moved.startSlotOffset = 0
+
+        // Conflict-check against the rest of the queue only: the batch's own
+        // former slots are exactly what this move is allowed to leave.
+        var others = document
+        var remaining = others.printQueue ?? []
+        remaining.removeAll { $0.id == session.batchID }
+        others.printQueue = remaining.isEmpty ? nil : remaining
+        if let conflict = others.firstPlacementConflict(for: moved) {
+            let coordinate = document.coordinateLabel(for: conflict.slotIndex)
+            let message = "Page \(conflict.pageIndex + 1) \(coordinate) is already fixed by “\(conflict.existingBatchName)”. Choose another empty position."
+            captureQueueIssue = message
+            statusMessage = message
+            return
+        }
+
+        updateDocument(coalescingKey: nil) { document in
+            var batches = document.printQueue ?? []
+            if let index = batches.firstIndex(where: { $0.id == session.batchID }) {
+                batches[index] = moved
+            }
+            document.printQueue = batches
+        }
+        printBatchMoveSession = nil
+        captureQueueIssue = nil
+        clampCurrentPageIndex()
+        schedulePreviewRefresh(immediate: true)
+        statusMessage = "Moved \(session.batchName) to page \(currentPageIndex + 1) \(document.coordinateLabel(for: slotIndex))"
     }
 
     func removePrintBatch(id: UUID) {
@@ -899,6 +1101,9 @@ final class DocumentStore: ObservableObject {
             var batches = document.printQueue ?? []
             batches.removeAll { $0.id == id }
             document.printQueue = batches.isEmpty ? nil : batches
+        }
+        if printBatchMoveSession?.batchID == id {
+            printBatchMoveSession = nil
         }
         if !document.hasQueuedLabels {
             pendingDraftPageIndex = currentPageIndex
@@ -933,6 +1138,8 @@ final class DocumentStore: ObservableObject {
         currentPageIndex = 0
         pendingDraftPageIndex = 0
         captureQueueIssue = nil
+        printBatchEditSession = nil
+        printBatchMoveSession = nil
         schedulePreviewRefresh(immediate: true)
         statusMessage = "Reset the capture queue"
     }
@@ -1038,6 +1245,8 @@ final class DocumentStore: ObservableObject {
         projectURL = nil
         selectedElementID = document.elements.first?.id
         editingElementID = nil
+        printBatchEditSession = nil
+        printBatchMoveSession = nil
         clearUndoHistory()
         schedulePreviewRefresh(immediate: true)
         statusMessage = "Started a new label project"
@@ -1271,6 +1480,8 @@ final class DocumentStore: ObservableObject {
             projectURL = url
             selectedElementID = document.elements.first?.id
             editingElementID = nil
+            printBatchEditSession = nil
+            printBatchMoveSession = nil
             currentPageIndex = 0
             pendingDraftPageIndex = document.hasQueuedLabels ? nil : 0
             clearUndoHistory()

@@ -1770,11 +1770,44 @@ struct PrintQueueSection: View {
                     Button {
                         store.enqueueCurrentLabel()
                     } label: {
-                        Label("Capture Current Setup", systemImage: "camera.fill")
-                            .frame(maxWidth: .infinity)
+                        Label(
+                            store.printBatchEditSession != nil ? "Update Capture" : "Capture Current Setup",
+                            systemImage: "camera.fill"
+                        )
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.canCaptureCurrentLabel)
+
+                    if let session = store.printBatchEditSession {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("Editing “\(session.batchName)”. Update Capture applies your changes back to its queue position.")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer(minLength: 4)
+
+                            Button("Cancel", action: store.cancelPrintBatchEdit)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                }
+
+                if let move = store.printBatchMoveSession {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("Moving \(move.batchName). Click an empty label position on the page preview.")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 4)
+
+                        Button("Cancel", action: store.cancelPrintBatchMove)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 }
 
                 if let issue = store.captureQueueIssue
@@ -1783,6 +1816,8 @@ struct PrintQueueSection: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                } else if store.printBatchMoveSession != nil {
+                    EmptyView()
                 } else if store.document.hasQueuedLabels,
                           store.pendingDraftPageIndex == nil {
                     Text("Click an empty label position to stage the next capture.")
@@ -1829,6 +1864,29 @@ struct PrintQueueSection: View {
                                         }
 
                                         Spacer(minLength: 4)
+
+                                        Button {
+                                            store.beginEditingPrintBatch(id: batch.id)
+                                        } label: {
+                                            Image(systemName: "pencil")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(store.printBatchEditSession != nil)
+                                        .help("Edit this capture")
+
+                                        Button {
+                                            store.beginMovingPrintBatch(id: batch.id)
+                                        } label: {
+                                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(store.printBatchEditSession != nil)
+                                        .foregroundStyle(
+                                            store.printBatchMoveSession?.batchID == batch.id
+                                                ? Color.accentColor
+                                                : Color.primary
+                                        )
+                                        .help("Move this capture to a new sheet position")
 
                                         Button {
                                             store.movePrintBatch(id: batch.id, by: -1)
@@ -1922,6 +1980,11 @@ struct CaptureQueueBar: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.red)
                     .lineLimit(2)
+            } else if let move = store.printBatchMoveSession {
+                Text("Moving \(move.batchName) — click an empty label position.")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
             } else if store.document.hasQueuedLabels,
                       store.pendingDraftPageIndex == nil {
                 Text("Choose an empty position for the next capture.")
@@ -1944,10 +2007,33 @@ struct CaptureQueueBar: View {
                 Button {
                     store.enqueueCurrentLabel()
                 } label: {
-                    Label("Capture", systemImage: "camera.fill")
+                    Label(
+                        store.printBatchEditSession != nil ? "Update" : "Capture",
+                        systemImage: "camera.fill"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!store.canCaptureCurrentLabel)
+
+                if store.printBatchEditSession != nil {
+                    Button {
+                        store.cancelPrintBatchEdit()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Cancel the capture edit and restore the queue")
+                }
+
+                if store.printBatchMoveSession != nil {
+                    Button {
+                        store.cancelPrintBatchMove()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Cancel the capture move")
+                }
 
                 Button {
                     queuePresented.toggle()

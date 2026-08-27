@@ -366,6 +366,13 @@ export function cloneDocument(document: LabelDocument): LabelDocument {
   return JSON.parse(JSON.stringify(document)) as LabelDocument;
 }
 
+function cloneElements(elements: LabelElement[]): LabelElement[] {
+  if (typeof globalThis.structuredClone === "function") {
+    return globalThis.structuredClone(elements);
+  }
+  return JSON.parse(JSON.stringify(elements)) as LabelElement[];
+}
+
 export function sheetFromOfficialFormat(format: OfficialFormatDefinition): SheetTemplate {
   return {
     id: format.code,
@@ -1069,7 +1076,8 @@ export type DocumentCoreErrorCode =
   | "queueLimit"
   | "placementConflict"
   | "invalidSlot"
-  | "capturedSlot";
+  | "capturedSlot"
+  | "unknownBatch";
 
 export class DocumentCoreError extends Error {
   readonly code: DocumentCoreErrorCode;
@@ -1103,6 +1111,10 @@ function batchName(elements: LabelElement[], fallbackNumber: number): string {
 export interface CaptureBatchOptions {
   id?: string;
   name?: string;
+  /** Preserved when re-capturing an edited batch so legacy captures keep their exact slots. */
+  startSlotOffset?: number;
+  /** Queue position for the new batch; appends when omitted. */
+  insertIndex?: number;
 }
 
 /** Snapshot the current artwork/merge setup and append it to the fixed queue. */
@@ -1131,7 +1143,7 @@ export function captureBatch(
     serialSettings: { ...snapshot.serial },
     capturedPlacement: clonePlacement(snapshot.placement),
     startPageIndex: Math.max(0, Math.trunc(startPageIndex)),
-    startSlotOffset: 0,
+    startSlotOffset: Math.max(0, Math.trunc(options.startSlotOffset ?? 0)),
   };
   if (snapshot.dataTable) {
     batch.dataTable = {
@@ -1139,11 +1151,15 @@ export function captureBatch(
       rows: snapshot.dataTable.rows.map((row) => ({ ...row })),
     };
   }
-  return enqueueBatch(snapshot, batch);
+  return enqueueBatch(snapshot, batch, options.insertIndex);
 }
 
 /** Append an already-created batch while enforcing the queue safety contract. */
-export function enqueueBatch(document: LabelDocument, value: PrintBatch): LabelDocument {
+export function enqueueBatch(
+  document: LabelDocument,
+  value: PrintBatch,
+  insertIndex?: number,
+): LabelDocument {
   const copy = freezeLegacyPrintQueuePlacement(document);
   const batch = normalizeBatch(value, (copy.printQueue?.length ?? 0) + 1);
   if (batch.quantity > MAX_PRINT_BATCH_QUANTITY - queuedLabelCount(copy)) {
@@ -1160,7 +1176,97 @@ export function enqueueBatch(document: LabelDocument, value: PrintBatch): LabelD
       conflict,
     );
   }
-  copy.printQueue = [...(copy.printQueue ?? []), batch];
+  const batches = [...(copy.printQueue ?? [])];
+  const position = insertIndex === undefined
+    ? batches.length
+    : clamp(Math.trunc(insertIndex), 0, batches.length);
+  batches.splice(position, 0, batch);
+  copy.printQueue = batches;
+  return copy;
+}
+
+export interface BatchEditContext {
+  /** The document with the batch removed and its setup restored as the draft. */
+  document: LabelDocument;
+  /** The batch that was taken out of the queue, for re-capture bookkeeping. */
+  batch: PrintBatch;
+  /** Where the batch sat in the queue, so an update can go back in place. */
+  queueIndex: number;
+}
+
+/**
+ * Load a captured batch back into the draft editor so it can be modified and
+ * re-captured. The batch leaves the queue (freeing its slots) and its label,
+ * numbering/CSV setup, and placement become the current draft.
+ */
+export function beginBatchEdit(document: LabelDocument, id: string): BatchEditContext {
+  const copy = freezeLegacyPrintQueuePlacement(document);
+  const queueIndex = (copy.printQueue ?? []).findIndex((batch) => batch.id === id);
+  const batch = copy.printQueue?.[queueIndex];
+  if (queueIndex < 0 || !batch) {
+    throw new DocumentCoreError("unknownBatch", "This capture is no longer in the queue.");
+  }
+  const remaining = copy.printQueue!.filter((candidate) => candidate.id !== id);
+  if (remaining.length > 0) copy.printQueue = remaining;
+  else delete copy.printQueue;
+
+  copy.elements = cloneElements(batch.elements);
+  if (batch.serialSettings) copy.serial = { ...batch.serialSettings };
+  if (batch.dataTable) {
+    copy.dataTable = {
+      headers: [...batch.dataTable.headers],
+      rows: batch.dataTable.rows.map((row) => ({ ...row })),
+    };
+  } else {
+    delete copy.dataTable;
+  }
+  if (batch.capturedPlacement) copy.placement = clonePlacement(batch.capturedPlacement);
+  return { document: copy, batch, queueIndex };
+}
+
+/**
+ * Move a captured batch's fixed sheet position: its selection area restarts at
+ * the given slot on the given page. Artwork, numbering, quantity, and queue
+ * order stay untouched.
+ */
+export function repositionBatch(
+  document: LabelDocument,
+  id: string,
+  slotIndex: number,
+  targetPageIndex: number,
+): LabelDocument {
+  const copy = freezeLegacyPrintQueuePlacement(document);
+  const queueIndex = (copy.printQueue ?? []).findIndex((batch) => batch.id === id);
+  const batch = copy.printQueue?.[queueIndex];
+  if (queueIndex < 0 || !batch) {
+    throw new DocumentCoreError("unknownBatch", "This capture is no longer in the queue.");
+  }
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= totalSlotCount(copy)) {
+    throw new DocumentCoreError("invalidSlot", `Invalid label slot: ${slotIndex}`);
+  }
+  const fillDirection = batch.capturedPlacement?.fillDirection ?? copy.placement.fillDirection;
+  const moved: PrintBatch = {
+    ...batch,
+    capturedPlacement: {
+      selectedSlotIndices: slotIndicesStarting(copy, slotIndex, fillDirection),
+      fillDirection,
+    },
+    startPageIndex: Math.max(0, Math.trunc(targetPageIndex)),
+    startSlotOffset: 0,
+  };
+  const others = cloneDocument(copy);
+  const remaining = (others.printQueue ?? []).filter((candidate) => candidate.id !== id);
+  if (remaining.length > 0) others.printQueue = remaining;
+  else delete others.printQueue;
+  const conflict = firstPlacementConflict(others, moved);
+  if (conflict) {
+    throw new DocumentCoreError(
+      "placementConflict",
+      `Page ${conflict.pageIndex + 1}, slot ${conflict.slotIndex + 1} is already fixed by “${conflict.existingBatchName}”.`,
+      conflict,
+    );
+  }
+  copy.printQueue![queueIndex] = moved;
   return copy;
 }
 

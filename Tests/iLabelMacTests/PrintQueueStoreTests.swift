@@ -421,4 +421,108 @@ final class PrintQueueStoreTests: XCTestCase {
         XCTAssertEqual(store.selectedElementID, element.id)
         XCTAssertEqual(store.editingElementID, element.id)
     }
+
+    func testEditingACaptureRoundTripsItBackIntoPlace() throws {
+        let store = DocumentStore()
+        store.addElement(.text)
+        let elementID = try XCTUnwrap(store.selectedElementID)
+
+        store.document.serial.end = 2
+        store.updateTextElement(id: elementID, content: "FIRST {{serial}}", richTextRTF: nil)
+        store.enqueueCurrentLabel()
+
+        store.updateTextElement(id: elementID, content: "SECOND {{serial}}", richTextRTF: nil)
+        store.selectPlacementStart(at: 2)
+        store.enqueueCurrentLabel()
+
+        let firstID = try XCTUnwrap(store.document.printBatches.first?.id)
+        let secondID = try XCTUnwrap(store.document.printBatches.last?.id)
+
+        store.beginEditingPrintBatch(id: firstID)
+
+        // The batch leaves the queue and its snapshot becomes the draft.
+        XCTAssertEqual(store.document.printBatches.map(\.id), [secondID])
+        XCTAssertEqual(store.document.elements.first?.content, "FIRST {{serial}}")
+        XCTAssertEqual(store.pendingDraftPageIndex, 0)
+        XCTAssertNotNil(store.printBatchEditSession)
+        // Its former slots are free while the batch is checked out.
+        XCTAssertNil(store.document.renderPayload(slotIndex: 0, pageIndex: 0).batchID)
+
+        let editedElementID = try XCTUnwrap(store.selectedElementID)
+        store.updateTextElement(id: editedElementID, content: "FIRST v2 {{serial}}", richTextRTF: nil)
+        store.enqueueCurrentLabel()
+
+        // Update Capture restores identity, queue order, and sheet position.
+        XCTAssertNil(store.printBatchEditSession)
+        XCTAssertEqual(store.document.printBatches.map(\.id), [firstID, secondID])
+        XCTAssertEqual(
+            store.document.printBatches.first?.elements.first?.content,
+            "FIRST v2 {{serial}}"
+        )
+        XCTAssertEqual(store.document.renderPayload(slotIndex: 0, pageIndex: 0).batchID, firstID)
+        XCTAssertEqual(store.document.renderPayload(slotIndex: 2, pageIndex: 0).batchID, secondID)
+    }
+
+    func testCancellingACaptureEditRestoresTheQueueUnchanged() throws {
+        let store = DocumentStore()
+        store.addElement(.text)
+        let elementID = try XCTUnwrap(store.selectedElementID)
+        store.updateTextElement(id: elementID, content: "KEEP ME", richTextRTF: nil)
+        store.enqueueCurrentLabel()
+        let batchID = try XCTUnwrap(store.document.printBatches.first?.id)
+
+        store.beginEditingPrintBatch(id: batchID)
+        let editedElementID = try XCTUnwrap(store.selectedElementID)
+        store.updateTextElement(id: editedElementID, content: "DISCARD ME", richTextRTF: nil)
+        store.cancelPrintBatchEdit()
+
+        XCTAssertNil(store.printBatchEditSession)
+        XCTAssertEqual(store.document.printBatches.map(\.id), [batchID])
+        XCTAssertEqual(store.document.printBatches.first?.elements.first?.content, "KEEP ME")
+        XCTAssertEqual(store.document.elements.first?.content, "KEEP ME")
+    }
+
+    func testRepositioningACaptureMovesItsFixedSlots() throws {
+        let store = DocumentStore()
+        store.addElement(.text)
+        let elementID = try XCTUnwrap(store.selectedElementID)
+
+        store.document.serial.end = 2
+        store.updateTextElement(id: elementID, content: "FIRST {{serial}}", richTextRTF: nil)
+        store.enqueueCurrentLabel()
+
+        store.updateTextElement(id: elementID, content: "SECOND {{serial}}", richTextRTF: nil)
+        store.selectPlacementStart(at: 2)
+        store.enqueueCurrentLabel()
+
+        let firstID = try XCTUnwrap(store.document.printBatches.first?.id)
+        let secondID = try XCTUnwrap(store.document.printBatches.last?.id)
+
+        store.beginMovingPrintBatch(id: firstID)
+        XCTAssertNotNil(store.printBatchMoveSession)
+
+        // Landing on another capture's fixed slots is rejected and keeps the
+        // move armed so the user can pick a different position.
+        store.selectPlacementStart(at: 2)
+        XCTAssertNotNil(store.printBatchMoveSession)
+        XCTAssertNotNil(store.captureQueueIssue)
+
+        store.selectPlacementStart(at: 6)
+        XCTAssertNil(store.printBatchMoveSession)
+        XCTAssertNil(store.captureQueueIssue)
+        XCTAssertEqual(store.document.printBatches.map(\.id), [firstID, secondID])
+        XCTAssertNil(store.document.renderPayload(slotIndex: 0, pageIndex: 0).batchID)
+        XCTAssertEqual(
+            store.document.renderPayload(slotIndex: 6, pageIndex: 0).batchID,
+            firstID
+        )
+        XCTAssertEqual(
+            store.document.renderPayload(slotIndex: 6, pageIndex: 0).context.serialValue,
+            1
+        )
+        XCTAssertEqual(
+            store.document.renderPayload(slotIndex: 2, pageIndex: 0).batchID,
+            secondID
+        )
+    }
 }
