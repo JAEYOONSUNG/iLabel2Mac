@@ -1,18 +1,18 @@
 {
   "mac": {
-    "version": "0.3.2",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-macOS.dmg",
-    "sha256": "9101474f0e50e368db8604e9d0770cc2beaaca0bbb6b969ccb9f52834e96515d",
-    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
+    "version": "0.3.3",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.3/iLabel-Studio-macOS.dmg",
+    "sha256": "2e11c29de36960e1a20356554485031dea1cc073bc9ad783ea73e55309797ed5",
+    "notes": "Right-click a captured label in the preview to edit, reposition, remove, or clear all captures. New projects start on your last-used label size. Wi-Fi printing now keeps searching for the printer's network after you press Print and delivers automatically when it appears."
   },
   "win": {
-    "version": "0.3.2",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-0.3.2-windows-x64-setup.exe",
-    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
+    "version": "0.3.3",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.3/iLabel-Studio-0.3.3-windows-x64-setup.exe",
+    "notes": "Right-click a captured label in the preview to edit, reposition, remove, or clear all captures. New projects start on your last-used label size. Wi-Fi printing now keeps searching for the printer's network after you press Print and delivers automatically when it appears."
   },
   "linux": {
-    "version": "0.3.2",
-    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.2/iLabel-Studio-0.3.2-linux-x86_64.AppImage",
-    "notes": "Capture queue entries can now be edited and repositioned: use the pencil button to load a capture back into the editor and Update Capture to put it back in place, or the move button to click the capture onto a new empty sheet position."
+    "version": "0.3.3",
+    "url": "https://github.com/JAEYOONSUNG/iLabel-Studio/releases/download/v0.3.3/iLabel-Studio-0.3.3-linux-x86_64.AppImage",
+    "notes": "Right-click a captured label in the preview to edit, reposition, remove, or clear all captures. New projects start on your last-used label size. Wi-Fi printing now keeps searching for the printer's network after you press Print and delivers automatically when it appears."
   }
 }
