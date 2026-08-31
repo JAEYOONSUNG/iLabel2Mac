@@ -189,6 +189,56 @@ function hasStarterArtwork(document: LabelDocument): boolean {
     && document.elements.every((element, index) => signature(element) === signature(starter.elements[index]));
 }
 
+interface LastSheetSetup {
+  formatCode?: string;
+  sheet?: unknown;
+}
+
+function loadLastSheetSetup(): LastSheetSetup | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem("ilabel2.lastSheetSetup") ?? "null") as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as LastSheetSetup;
+  } catch {
+    // A damaged preference must never prevent the editor from opening.
+  }
+  return null;
+}
+
+/* Start a fresh document on the label stock the user last worked with; fall
+   back to the factory default on first launch. The stored sheet is sanitized
+   by the caller's normalizeDocument pass. */
+function applyStartupSheetSetup(document: LabelDocument): void {
+  const startupFormat = (() => {
+    const last = loadLastSheetSetup();
+    if (!last) return OFFICIAL_FORMATS.find((format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE);
+    const remembered = typeof last.formatCode === "string"
+      ? OFFICIAL_FORMATS.find((format) => format.code === last.formatCode)
+      : undefined;
+    if (remembered) return remembered;
+    if (last.sheet && typeof last.sheet === "object") {
+      document.sheet = { ...document.sheet, ...(last.sheet as Partial<SheetTemplate>) };
+      document.elements = [];
+      delete document.formatCode;
+      delete document.formatFamily;
+      delete document.formatSourceURL;
+      delete document.formatPDFTemplateURL;
+      const name = (last.sheet as { name?: unknown }).name;
+      if (typeof name === "string" && name) document.title = name;
+      return undefined;
+    }
+    return OFFICIAL_FORMATS.find((format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE);
+  })();
+  if (startupFormat) {
+    document.title = startupFormat.code;
+    document.sheet = sheetFromFormat(startupFormat);
+    document.elements = [];
+    document.formatCode = startupFormat.code;
+    document.formatFamily = startupFormat.family;
+    document.formatSourceURL = startupFormat.detailURL;
+    document.formatPDFTemplateURL = startupFormat.pdfTemplateURL;
+  }
+}
+
 function createInitialDocument(): LabelDocument {
   const document = createStarterDocument();
   try {
@@ -201,18 +251,7 @@ function createInitialDocument(): LabelDocument {
   } catch {
     // A damaged preference must never prevent the editor from opening.
   }
-  const defaultFormat = OFFICIAL_FORMATS.find(
-    (format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE,
-  );
-  if (defaultFormat) {
-    document.title = defaultFormat.code;
-    document.sheet = sheetFromFormat(defaultFormat);
-    document.elements = [];
-    document.formatCode = defaultFormat.code;
-    document.formatFamily = defaultFormat.family;
-    document.formatSourceURL = defaultFormat.detailURL;
-    document.formatPDFTemplateURL = defaultFormat.pdfTemplateURL;
-  }
+  applyStartupSheetSetup(document);
   return normalizeDocument(document);
 }
 
@@ -1436,6 +1475,7 @@ interface PageBoardProps {
   draftBatchID?: string;
   onSelectSlot?: (slotIndex: number) => void;
   onSelectRange?: (startSlot: number, endSlot: number) => void;
+  onSlotContextMenu?: (slotIndex: number, position: { x: number; y: number }) => void;
 }
 
 function PageBoard({
@@ -1447,6 +1487,7 @@ function PageBoard({
   draftBatchID,
   onSelectSlot,
   onSelectRange,
+  onSlotContextMenu,
 }: PageBoardProps) {
   const { ref, size } = useElementSize<HTMLDivElement>();
   const inset = compact ? 20 : 28;
@@ -1538,6 +1579,12 @@ function PageBoard({
                 else onSelectSlot?.(slotIndex);
                 dragStart.current = undefined;
               }}
+              onContextMenu={(event) => {
+                if (!onSlotContextMenu) return;
+                event.preventDefault();
+                dragStart.current = undefined;
+                onSlotContextMenu(slotIndex, { x: event.clientX, y: event.clientY });
+              }}
             />
           );
         })}
@@ -1560,6 +1607,7 @@ interface EditorProps extends NumberingQueueProps {
   onActivateText: LabelEditorProps["onActivateText"];
   onSelectSlot: (slotIndex: number) => void;
   onSelectSlotRange: (startSlot: number, endSlot: number) => void;
+  onSlotContextMenu: (slotIndex: number, position: { x: number; y: number }) => void;
   onResetArea: () => void;
 }
 
@@ -1580,6 +1628,7 @@ function Editor({
   onActivateText,
   onSelectSlot,
   onSelectSlotRange,
+  onSlotContextMenu,
   onResetArea,
   onSerialField,
   onFillDirection,
@@ -1652,7 +1701,7 @@ function Editor({
                       : "This is the full-sheet layout that will be exported or printed."}
                   </p>
                 </div>
-                <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive compact draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
+                <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive compact draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} onSlotContextMenu={onSlotContextMenu} />
                 <div className="preview-legend">
                   <button onClick={onResetArea}>Reset Area</button>
                   <span className="legend-key"><span className="legend-dot" />{queued ? "Captured" : "Print now"}</span>
@@ -1692,7 +1741,7 @@ function Editor({
             </div>
           </>
         ) : (
-          <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} />
+          <PageBoard document={previewDocument} pageIndex={pageIndex} conflictSlots={conflicts} interactive draftBatchID={DRAFT_BATCH_ID} onSelectSlot={onSelectSlot} onSelectRange={onSelectSlotRange} onSlotContextMenu={onSlotContextMenu} />
         )}
       </div>
     </main>
@@ -1758,6 +1807,13 @@ function App() {
   const [captureIssue, setCaptureIssue] = useState<string>();
   const [captureEdit, setCaptureEdit] = useState<CaptureEditSession>();
   const [captureMove, setCaptureMove] = useState<{ id: string; name: string }>();
+  const [slotMenu, setSlotMenu] = useState<{
+    x: number;
+    y: number;
+    slotIndex: number;
+    batchID?: string;
+    batchName?: string;
+  }>();
   const [busy, setBusy] = useState<string>();
   const [platform, setPlatform] = useState<string>();
   const [localFonts, setLocalFonts] = useState<LocalFontData[]>([]);
@@ -1790,6 +1846,15 @@ function App() {
     void _discardedPassword;
     localStorage.setItem("ilabel2.printAutomation", JSON.stringify(machineSafeSettings));
   }, [document.printAutomation]);
+
+  useEffect(() => {
+    // Remember the working label stock so the next session (and New) starts
+    // on it instead of the factory default.
+    localStorage.setItem("ilabel2.lastSheetSetup", JSON.stringify({
+      ...(document.formatCode ? { formatCode: document.formatCode } : {}),
+      sheet: document.sheet,
+    }));
+  }, [document.formatCode, document.sheet]);
 
   useEffect(() => {
     window.iLabelDesktop.getOSInfo().then((result) => {
@@ -2022,20 +2087,10 @@ function App() {
   }, [updatePendingPage]);
 
   const newProject = useCallback(() => {
-    const next = createStarterDocument();
-    next.printAutomation = clone(documentRef.current.printAutomation ?? DEFAULT_PRINT_AUTOMATION);
-    const defaultFormat = catalog.find(
-      (format) => format.code === DEFAULT_OFFICIAL_FORMAT_CODE,
-    );
-    if (defaultFormat) {
-      next.title = defaultFormat.code;
-      next.sheet = sheetFromFormat(defaultFormat);
-      next.elements = [];
-      next.formatCode = defaultFormat.code;
-      next.formatFamily = defaultFormat.family;
-      next.formatSourceURL = defaultFormat.detailURL;
-      next.formatPDFTemplateURL = defaultFormat.pdfTemplateURL;
-    }
+    const draft = createStarterDocument();
+    draft.printAutomation = clone(documentRef.current.printAutomation ?? DEFAULT_PRINT_AUTOMATION);
+    applyStartupSheetSetup(draft);
+    const next = normalizeDocument(draft);
     documentRef.current = next;
     setDocument(next);
     setSelectedID(next.elements[0]?.id);
@@ -2047,7 +2102,7 @@ function App() {
     setCaptureMove(undefined);
     resetHistory();
     setStatus("Started a new label project");
-  }, [catalog, resetHistory, updatePendingPage]);
+  }, [resetHistory, updatePendingPage]);
 
   const openProject = useCallback(async () => {
     try {
@@ -2625,6 +2680,24 @@ function App() {
     setCaptureMove(undefined);
   }, [replaceDocument, updatePendingPage]);
 
+  /* Right-click on a preview slot: captured slots offer their batch's
+     actions; any right-click while a queue exists offers the full clear. */
+  const openSlotContextMenu = useCallback((slotIndex: number, position: { x: number; y: number }) => {
+    const current = documentRef.current;
+    if ((current.printQueue?.length ?? 0) === 0) return;
+    const payload = renderPayload(current, slotIndex, Math.max(0, currentPage));
+    const batch = payload.batchID
+      ? current.printQueue?.find((candidate) => candidate.id === payload.batchID)
+      : undefined;
+    setSlotMenu({
+      x: Math.max(8, Math.min(position.x, globalThis.innerWidth - 230)),
+      y: Math.max(8, Math.min(position.y, globalThis.innerHeight - 190)),
+      slotIndex,
+      batchID: batch?.id,
+      batchName: batch?.name,
+    });
+  }, [currentPage]);
+
   const changeFillDirection = useCallback((value: LabelDocument["placement"]["fillDirection"]) => {
     replaceDocument(
       updatePlacementFillDirection(documentRef.current, value),
@@ -2642,7 +2715,10 @@ function App() {
       password: settings.printerPassword || undefined,
       interfaceName: service && (platform === "win32" || service !== "Wi-Fi") ? service : undefined,
       restoreSSID: settings.restoreSSID?.trim() || undefined,
-      timeoutMs: 30_000,
+      // Wide discovery window: the main process keeps retrying the join
+      // while the printer's Wi-Fi wakes up, so the queued job auto-delivers
+      // the moment the network appears.
+      timeoutMs: 90_000,
     };
   }, [platform]);
 
@@ -2654,7 +2730,7 @@ function App() {
     }
     setBusy(`Testing ${settings.printerSSID}…`);
     try {
-      const result = unwrapIPC(await window.iLabelDesktop.wifi.test({ ...printSettingsRequest(), restoreAfterTest: settings.reconnectToPreviousWiFi }));
+      const result = unwrapIPC(await window.iLabelDesktop.wifi.test({ ...printSettingsRequest(), timeoutMs: 30_000, restoreAfterTest: settings.reconnectToPreviousWiFi }));
       if (result) {
         setStatus(result.restoreError
           ? `Connected to ${result.targetSSID}, but restore failed: ${result.restoreError}`
@@ -2751,7 +2827,7 @@ function App() {
           (phase) => {
             const labels = {
               "checking-current-network": "Print queued · checking the current network…",
-              "switching-to-printer": `Print still queued · connecting to ${settings.printerSSID}…`,
+              "switching-to-printer": `Print still queued · searching for ${settings.printerSSID} and connecting…`,
               "waiting-for-printer": "Printer connected · waiting for the spool job to finish…",
               "restoring-network": "Restoring Wi-Fi…",
             } as const;
@@ -2806,6 +2882,8 @@ function App() {
       } else if ((event.key === "Delete" || event.key === "Backspace") && !isEditingControl(event.target)) {
         event.preventDefault();
         deleteSelected();
+      } else if (event.key === "Escape") {
+        setSlotMenu(undefined);
       }
     };
     globalThis.addEventListener("keydown", handler);
@@ -2924,6 +3002,7 @@ function App() {
           onActivateText={activatePrimaryText}
           onSelectSlot={selectSlot}
           onSelectSlotRange={selectSlotRange}
+          onSlotContextMenu={openSlotContextMenu}
           onResetArea={resetPlacementArea}
           onSerialField={serialField}
           onFillDirection={changeFillDirection}
@@ -2980,6 +3059,33 @@ function App() {
           onPrintAll={() => void printDocument(true)}
         />
       </div>
+
+      {slotMenu && (
+        <div
+          className="context-menu-backdrop"
+          onPointerDown={() => setSlotMenu(undefined)}
+          onContextMenu={(event) => { event.preventDefault(); setSlotMenu(undefined); }}
+        >
+          <div
+            className="context-menu"
+            role="menu"
+            aria-label="Capture actions"
+            style={{ left: slotMenu.x, top: slotMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {slotMenu.batchID && (
+              <>
+                <div className="context-menu-title">{slotMenu.batchName ?? "Capture"}</div>
+                <button role="menuitem" onClick={() => { setSlotMenu(undefined); editCapturedBatch(slotMenu.batchID!); }}>✎ Edit capture</button>
+                <button role="menuitem" onClick={() => { setSlotMenu(undefined); beginMoveCapturedBatch(slotMenu.batchID!); }}>⌖ Reposition capture</button>
+                <button role="menuitem" className="danger" onClick={() => { setSlotMenu(undefined); removeCapturedBatch(slotMenu.batchID!); }}>× Remove capture</button>
+                <div className="context-menu-separator" />
+              </>
+            )}
+            <button role="menuitem" className="danger" onClick={() => { setSlotMenu(undefined); resetQueue(); }}>Clear all captures</button>
+          </div>
+        </div>
+      )}
 
       {busy && <div className="busy-overlay" role="status" aria-live="polite"><div className="busy-card">{busy}</div></div>}
     </div>

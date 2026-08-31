@@ -51,6 +51,10 @@ enum WiFiAutomationError: LocalizedError {
     case missingWiFiDevice
     case commandFailed(String)
     case connectionTimeout(String)
+    /// The network is not broadcasting (yet): the retriable failure. A
+    /// printer's SoftAP takes seconds to wake, so callers keep scanning
+    /// until the discovery window closes instead of giving up on one miss.
+    case networkNotFound(String)
 
     var errorDescription: String? {
         switch self {
@@ -61,6 +65,8 @@ enum WiFiAutomationError: LocalizedError {
         case let .commandFailed(message):
             return message
         case let .connectionTimeout(message):
+            return message
+        case let .networkNotFound(message):
             return message
         }
     }
@@ -362,7 +368,11 @@ enum WiFiPrintAutomation {
         )
     }
 
-    static func prepare(settings: PrintAutomationSettings) async throws -> WiFiPrintSession? {
+    static func prepare(
+        settings: PrintAutomationSettings,
+        discoveryTimeoutSeconds: Double = 0,
+        onStatus: (@Sendable (String) -> Void)? = nil
+    ) async throws -> WiFiPrintSession? {
         guard settings.enabled else { return nil }
         let printerSSID = settings.printerSSID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !printerSSID.isEmpty else {
@@ -392,7 +402,9 @@ enum WiFiPrintAutomation {
             try await connectAndWait(
                 service: settings.wifiService,
                 ssid: printerSSID,
-                password: settings.printerPassword.isEmpty ? nil : settings.printerPassword
+                password: settings.printerPassword.isEmpty ? nil : settings.printerPassword,
+                discoveryTimeoutSeconds: discoveryTimeoutSeconds,
+                onStatus: onStatus
             )
         }
 
@@ -440,7 +452,7 @@ enum WiFiPrintAutomation {
         }
         let networks = (try? interface.scanForNetworks(withName: ssid)) ?? []
         guard let network = networks.first else {
-            throw WiFiAutomationError.commandFailed("Could not find network \(ssid) in a Wi-Fi scan. The printer may be off, asleep, or out of range.")
+            throw WiFiAutomationError.networkNotFound("Could not find network \(ssid) in a Wi-Fi scan. The printer may be off, asleep, or out of range.")
         }
         do {
             let effectivePassword = (password?.isEmpty == false) ? password : nil
@@ -489,14 +501,37 @@ enum WiFiPrintAutomation {
         service: String,
         ssid: String,
         password: String?,
-        timeoutSeconds: Double = 20.0
+        timeoutSeconds: Double = 20.0,
+        discoveryTimeoutSeconds: Double = 0,
+        onStatus: (@Sendable (String) -> Void)? = nil
     ) async throws {
         // Snapshot the lease before switching: on macOS 15+ the SSID is
         // redacted from every CLI, so a changed DHCP address is the only
         // observable proof that we actually moved to the new network.
         let device = wifiDevice()
         let previousIPv4 = device.flatMap { ipv4Address(device: $0) }
-        try connect(service: service, ssid: ssid, password: password)
+
+        // A single scan miss must not abort the print: a printer's SoftAP
+        // wakes seconds after the printer does, and the user expects the app
+        // to keep searching and deliver the job the moment the network
+        // appears. Retry the join on "not found" until the discovery window
+        // closes; every other failure (bad password, blocked switch) is
+        // final and surfaces immediately.
+        let discoveryDeadline = Date().addingTimeInterval(max(0, discoveryTimeoutSeconds))
+        let searchStartedAt = Date()
+        while true {
+            do {
+                try connect(service: service, ssid: ssid, password: password)
+                break
+            } catch WiFiAutomationError.networkNotFound(let message) {
+                guard Date().addingTimeInterval(3.0) < discoveryDeadline else {
+                    throw WiFiAutomationError.networkNotFound(message)
+                }
+                let waited = Int(Date().timeIntervalSince(searchStartedAt))
+                onStatus?("Searching for \(ssid)… (\(waited)s) Turn the printer on if it isn't.")
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
         try await waitUntilConnected(
             service: service,
             expectedSSID: ssid,

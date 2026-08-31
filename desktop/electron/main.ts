@@ -937,12 +937,30 @@ async function switchWifi(request: WifiRequest): Promise<{
   const before = await wifiStatus();
   let after: Awaited<ReturnType<typeof wifiStatus>>;
   let temporaryProfile: string | undefined;
-  if (process.platform === "win32") {
-    const connected = await connectWindowsWifi(request);
-    after = connected.status;
-    temporaryProfile = connected.temporaryProfile;
-  } else {
-    after = await connectLinuxWifi(request);
+
+  // A printer's SoftAP takes seconds to wake, and a join attempt against a
+  // network that is not broadcasting yet fails outright. Keep retrying the
+  // join until the caller's window closes so a queued print job delivers
+  // the moment the network appears, instead of failing on the first miss.
+  const deadline = Date.now() + (request.timeoutMs ?? 25_000);
+  const attemptRequest: WifiRequest = {
+    ...request,
+    timeoutMs: Math.min(20_000, Math.max(5_000, request.timeoutMs ?? 20_000)),
+  };
+  for (;;) {
+    try {
+      if (process.platform === "win32") {
+        const connected = await connectWindowsWifi(attemptRequest);
+        after = connected.status;
+        temporaryProfile = connected.temporaryProfile;
+      } else {
+        after = await connectLinuxWifi(attemptRequest);
+      }
+      break;
+    } catch (error) {
+      if (Date.now() + 4_000 >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+    }
   }
 
   const sessionToken = randomUUID();

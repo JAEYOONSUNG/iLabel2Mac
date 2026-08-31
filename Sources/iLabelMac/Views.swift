@@ -3196,7 +3196,11 @@ struct LivePagePreviewPanel: View {
                 pageCount: store.document.pageCount,
                 onTapSlot: { store.selectPlacementStart(at: $0) },
                 onDragSlots: { store.selectPlacementRect(from: $0, to: $1) },
-                onResetArea: { store.clearPlacementSelection() }
+                onResetArea: { store.clearPlacementSelection() },
+                onEditBatch: { store.beginEditingPrintBatch(id: $0) },
+                onRepositionBatch: { store.beginMovingPrintBatch(id: $0) },
+                onRemoveBatch: { store.removePrintBatch(id: $0) },
+                onClearQueue: { store.clearPrintQueue() }
             )
             .equatable()
 
@@ -3233,6 +3237,10 @@ struct LivePagePreviewBody: View, Equatable {
     let onTapSlot: (Int) -> Void
     let onDragSlots: (Int, Int) -> Void
     let onResetArea: () -> Void
+    var onEditBatch: ((UUID) -> Void)? = nil
+    var onRepositionBatch: ((UUID) -> Void)? = nil
+    var onRemoveBatch: ((UUID) -> Void)? = nil
+    var onClearQueue: (() -> Void)? = nil
 
     static func == (lhs: LivePagePreviewBody, rhs: LivePagePreviewBody) -> Bool {
         lhs.document == rhs.document
@@ -3294,7 +3302,11 @@ struct LivePagePreviewBody: View, Equatable {
                 validDraftPlan: validDraftPlan,
                 conflictSlots: conflictSlots,
                 onTapSlot: onTapSlot,
-                onDragSlots: onDragSlots
+                onDragSlots: onDragSlots,
+                onEditBatch: onEditBatch,
+                onRepositionBatch: onRepositionBatch,
+                onRemoveBatch: onRemoveBatch,
+                onClearQueue: onClearQueue
             )
                 .padding(4)
                 .background(
@@ -3381,6 +3393,10 @@ struct InteractivePagePreviewCanvas: View {
     let conflictSlots: Set<Int>
     let onTapSlot: (Int) -> Void
     let onDragSlots: (Int, Int) -> Void
+    var onEditBatch: ((UUID) -> Void)? = nil
+    var onRepositionBatch: ((UUID) -> Void)? = nil
+    var onRemoveBatch: ((UUID) -> Void)? = nil
+    var onClearQueue: (() -> Void)? = nil
 
     @State private var dragStartSlot: Int?
 
@@ -3436,8 +3452,12 @@ struct InteractivePagePreviewCanvas: View {
                     let row = slotIndex / document.sheet.columns
                     let column = slotIndex % document.sheet.columns
                     let frame = document.sheet.slotFrame(column: column, row: row)
+                    let capturedBatchID = document.renderPayload(
+                        slotIndex: slotIndex,
+                        pageIndex: pageIndex
+                    ).batchID
 
-                    Rectangle()
+                    let slotHitArea = Rectangle()
                         .fill(Color.clear)
                         .contentShape(Rectangle())
                         .frame(width: scaled(frame.width, by: scale), height: scaled(frame.height, by: scale))
@@ -3464,6 +3484,41 @@ struct InteractivePagePreviewCanvas: View {
                                     dragStartSlot = nil
                                 }
                         )
+
+                    if capturedBatchID != nil || document.hasQueuedLabels {
+                        slotHitArea.contextMenu {
+                            if let capturedBatchID {
+                                Button {
+                                    onEditBatch?(capturedBatchID)
+                                } label: {
+                                    Label("Edit Capture", systemImage: "pencil")
+                                }
+                                Button {
+                                    onRepositionBatch?(capturedBatchID)
+                                } label: {
+                                    Label("Reposition Capture", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    onRemoveBatch?(capturedBatchID)
+                                } label: {
+                                    Label("Remove Capture", systemImage: "trash")
+                                }
+                            }
+                            if document.hasQueuedLabels {
+                                if capturedBatchID != nil {
+                                    Divider()
+                                }
+                                Button(role: .destructive) {
+                                    onClearQueue?()
+                                } label: {
+                                    Label("Clear All Captures", systemImage: "trash.slash")
+                                }
+                            }
+                        }
+                    } else {
+                        slotHitArea
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

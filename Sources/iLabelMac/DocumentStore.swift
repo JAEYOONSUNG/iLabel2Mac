@@ -4,11 +4,43 @@ import UniformTypeIdentifiers
 
 private let defaultOfficialFormatCode = SheetTemplate.default680.id
 private let cachedPrintAutomationKey = "iLabel2Mac.cachedPrintAutomation"
+private let cachedLastSheetSetupKey = "iLabel2Mac.cachedLastSheetSetup"
 private let cachedQuickTextPresetsKey = "iLabel2Mac.cachedQuickTextPresets"
 private let cachedAppearanceModeKey = "iLabel2Mac.cachedAppearanceMode"
 let quickTextInsertNotification = Notification.Name("iLabel2Mac.quickTextInsert")
 let textStyleActionNotification = Notification.Name("iLabel2Mac.textStyleAction")
 let showEmojiPickerNotification = Notification.Name("iLabel2Mac.showEmojiPicker")
+
+/// Persistence facade: UserDefaults in the app, an in-memory store under
+/// XCTest. Store instances must start canonical in tests — persisting the
+/// last-used sheet through shared UserDefaults let one test's geometry edit
+/// leak into every store the suite created afterwards.
+protocol PreferenceStoring: AnyObject {
+    func data(forKey key: String) -> Data?
+    func set(_ value: Any?, forKey key: String)
+    func stringArray(forKey key: String) -> [String]?
+    func string(forKey key: String) -> String?
+}
+
+extension UserDefaults: PreferenceStoring {}
+
+final class InMemoryPreferenceStore: PreferenceStoring {
+    private var values: [String: Any] = [:]
+
+    func data(forKey key: String) -> Data? { values[key] as? Data }
+
+    func set(_ value: Any?, forKey key: String) {
+        if let value {
+            values[key] = value
+        } else {
+            values.removeValue(forKey: key)
+        }
+    }
+
+    func stringArray(forKey key: String) -> [String]? { values[key] as? [String] }
+
+    func string(forKey key: String) -> String? { values[key] as? String }
+}
 
 enum TextStyleAction: Equatable {
     case bold
@@ -201,17 +233,24 @@ final class DocumentStore: ObservableObject {
     // first one's switch → transmit → restore cycle to finish.
     private var wifiAutomationTask: Task<Void, Never>?
 
-    init() {
+    /// Snapshot of the most recently used label stock, so a new session (or
+    /// New) starts on the size the user actually works with instead of the
+    /// factory default. A remembered official format restores its full
+    /// metadata; a custom/preset sheet restores its raw geometry.
+    private struct LastSheetSetup: Codable {
+        var formatCode: String?
+        var sheet: SheetTemplate
+    }
+
+    private let preferences: PreferenceStoring
+
+    init(preferences: PreferenceStoring? = nil) {
+        self.preferences = preferences
+            ?? (NSClassFromString("XCTestCase") != nil
+                ? InMemoryPreferenceStore()
+                : UserDefaults.standard)
         officialFormats = OfficialFormatCatalog.load()
-        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) {
-            document.sheet = defaultFormat.sheetTemplate
-            document.formatCode = defaultFormat.code
-            document.formatFamily = defaultFormat.family
-            document.formatSourceURL = defaultFormat.detailURL
-            document.formatPDFTemplateURL = defaultFormat.pdfTemplateURL
-            document.title = defaultFormat.code
-            document.elements = []
-        }
+        applyStartupSheetSetup()
         document.printAutomation = loadCachedPrintAutomation()
         quickTextPresets = loadCachedQuickTextPresets()
         appearanceMode = loadAppearanceMode()
@@ -380,6 +419,7 @@ final class DocumentStore: ObservableObject {
         document.formatSourceURL = nil
         document.formatPDFTemplateURL = nil
         document.clampElementsToSheet()
+        persistLastSheetSetup()
         clampCurrentPageIndex()
         schedulePreviewRefresh()
     }
@@ -516,7 +556,14 @@ final class DocumentStore: ObservableObject {
         wifiTestStatus = "Testing..."
         Task {
             do {
-                let session = try await WiFiPrintAutomation.prepare(settings: settings)
+                let session = try await WiFiPrintAutomation.prepare(
+                    settings: settings,
+                    discoveryTimeoutSeconds: 15
+                ) { message in
+                    Task { @MainActor [weak self] in
+                        self?.wifiTestStatus = message
+                    }
+                }
                 await MainActor.run {
                     refreshCurrentWiFiSSID()
                     wifiTestStatus = settings.enabled ? "Connected to \(currentWiFiSSID)" : "Wi-Fi print disabled"
@@ -1237,9 +1284,7 @@ final class DocumentStore: ObservableObject {
     func newDocument() {
         document = .starter
         document.printAutomation = loadCachedPrintAutomation()
-        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) {
-            applyOfficialFormat(defaultFormat, updateTitle: true)
-        }
+        applyStartupSheetSetup()
         currentPageIndex = 0
         pendingDraftPageIndex = 0
         projectURL = nil
@@ -1302,6 +1347,7 @@ final class DocumentStore: ObservableObject {
             selectedElementID = nil
         }
         editingElementID = nil
+        persistLastSheetSetup()
         schedulePreviewRefresh(immediate: true)
         statusMessage = "Applied official format: \(format.code)"
     }
@@ -1477,6 +1523,9 @@ final class DocumentStore: ObservableObject {
                 documentValue: document.printAutomation
             )
             persistPrintAutomationCache(document.printAutomation)
+            // The opened project's stock is now the "last used" size that a
+            // future New/launch starts from.
+            persistLastSheetSetup()
             projectURL = url
             selectedElementID = document.elements.first?.id
             editingElementID = nil
@@ -1692,7 +1741,18 @@ final class DocumentStore: ObservableObject {
             }
             let session: WiFiPrintSession?
             do {
-                session = try await WiFiPrintAutomation.prepare(settings: settings)
+                // Keep scanning while the printer's SoftAP wakes up: the job
+                // is already queued, so the moment the network appears the
+                // join fires and delivery happens automatically.
+                session = try await WiFiPrintAutomation.prepare(
+                    settings: settings,
+                    discoveryTimeoutSeconds: 90
+                ) { message in
+                    Task { @MainActor [weak self] in
+                        self?.wifiTestStatus = message
+                        self?.statusMessage = message
+                    }
+                }
             } catch {
                 await MainActor.run {
                     refreshCurrentWiFiSSID()
@@ -1805,8 +1865,58 @@ final class DocumentStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
+    /// Start the given (fresh) document on the last label stock the user
+    /// worked with; fall back to the factory default on first launch.
+    private func applyStartupSheetSetup() {
+        if let last = loadLastSheetSetup() {
+            if let code = last.formatCode,
+               let format = officialFormats.first(where: { $0.code == code }) {
+                document.sheet = format.sheetTemplate
+                document.formatCode = format.code
+                document.formatFamily = format.family
+                document.formatSourceURL = format.detailURL
+                document.formatPDFTemplateURL = format.pdfTemplateURL
+                document.title = format.code
+                document.elements = []
+                return
+            }
+            document.sheet = last.sheet
+            document.formatCode = nil
+            document.formatFamily = nil
+            document.formatSourceURL = nil
+            document.formatPDFTemplateURL = nil
+            if !last.sheet.name.isEmpty {
+                document.title = last.sheet.name
+            }
+            document.elements = []
+            return
+        }
+        if let defaultFormat = officialFormats.first(where: { $0.code == defaultOfficialFormatCode }) {
+            document.sheet = defaultFormat.sheetTemplate
+            document.formatCode = defaultFormat.code
+            document.formatFamily = defaultFormat.family
+            document.formatSourceURL = defaultFormat.detailURL
+            document.formatPDFTemplateURL = defaultFormat.pdfTemplateURL
+            document.title = defaultFormat.code
+            document.elements = []
+        }
+    }
+
+    private func loadLastSheetSetup() -> LastSheetSetup? {
+        guard let data = preferences.data(forKey: cachedLastSheetSetupKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(LastSheetSetup.self, from: data)
+    }
+
+    private func persistLastSheetSetup() {
+        let setup = LastSheetSetup(formatCode: document.formatCode, sheet: document.sheet)
+        guard let data = try? JSONEncoder().encode(setup) else { return }
+        preferences.set(data, forKey: cachedLastSheetSetupKey)
+    }
+
     private func loadCachedPrintAutomation() -> PrintAutomationSettings {
-        if let data = UserDefaults.standard.data(forKey: cachedPrintAutomationKey),
+        if let data = preferences.data(forKey: cachedPrintAutomationKey),
            let settings = try? JSONDecoder().decode(PrintAutomationSettings.self, from: data) {
             return settings
         }
@@ -1822,22 +1932,22 @@ final class DocumentStore: ObservableObject {
 
     private func persistPrintAutomationCache(_ settings: PrintAutomationSettings) {
         guard let data = try? JSONEncoder().encode(settings) else { return }
-        UserDefaults.standard.set(data, forKey: cachedPrintAutomationKey)
+        preferences.set(data, forKey: cachedPrintAutomationKey)
     }
 
     private func loadCachedQuickTextPresets() -> [String] {
-        if let items = UserDefaults.standard.stringArray(forKey: cachedQuickTextPresetsKey), !items.isEmpty {
+        if let items = preferences.stringArray(forKey: cachedQuickTextPresetsKey), !items.isEmpty {
             return items
         }
         return ["DH5a", "TOP10", "JM110", "BL21(DE3)", "Stbl3"]
     }
 
     private func persistQuickTextPresets() {
-        UserDefaults.standard.set(quickTextPresets, forKey: cachedQuickTextPresetsKey)
+        preferences.set(quickTextPresets, forKey: cachedQuickTextPresetsKey)
     }
 
     private func loadAppearanceMode() -> AppAppearanceMode {
-        guard let raw = UserDefaults.standard.string(forKey: cachedAppearanceModeKey),
+        guard let raw = preferences.string(forKey: cachedAppearanceModeKey),
               let mode = AppAppearanceMode(rawValue: raw) else {
             return .system
         }
@@ -1845,7 +1955,7 @@ final class DocumentStore: ObservableObject {
     }
 
     private func persistAppearanceMode() {
-        UserDefaults.standard.set(appearanceMode.rawValue, forKey: cachedAppearanceModeKey)
+        preferences.set(appearanceMode.rawValue, forKey: cachedAppearanceModeKey)
     }
 
     private func refreshCurrentWiFiSSID() {
