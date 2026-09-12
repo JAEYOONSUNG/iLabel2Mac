@@ -15,240 +15,85 @@
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=Inter:wght@400;500;600&display=swap">
-<style>
-  :root {
-    --ink: #18181B;
-    --body: #52525B;
-    --soft: #71717A;
-    --surface: #F4F4F5;
-    --border: #E4E4E7;
-    --accent: #00A7F5;
-    --tint: #DFF2FE;
-    --r-card: 30px;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  html { scroll-behavior: smooth; }
-  body {
-    background: #fff;
-    color: var(--ink);
-    font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  img { max-width: 100%; display: block; }
-  a { color: inherit; text-decoration: none; }
-  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-  h1, h2, h3, .display {
-    font-family: "Inter Tight", "Inter", sans-serif;
-    font-weight: 500;
-    letter-spacing: -0.03em;
-    line-height: 1.08;
-    text-wrap: balance;
-  }
-
-  /* ---------- nav ---------- */
-  nav {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
-    background: rgba(255,255,255,0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid rgba(228,228,231,0.6);
-  }
-  .nav-inner {
-    display: flex; align-items: center; justify-content: space-between;
-    height: 64px;
-  }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
-  .brand img { width: 28px; height: 28px; }
-  .nav-links { display: flex; align-items: center; gap: 28px; font-size: 14.5px; font-weight: 500; color: var(--body); }
-  .nav-links a:hover { color: var(--ink); }
-  @media (max-width: 720px) { .nav-links .hide-sm { display: none; } }
-
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    border-radius: 999px;
-    font-weight: 500; font-size: 15px;
-    padding: 12px 24px;
-    transition: transform 0.15s ease, background 0.15s ease;
-    cursor: pointer;
-  }
-  .btn:hover { transform: translateY(-1px); }
-  .btn-dark { background: var(--ink); color: #fff; }
-  .btn-dark:hover { background: #27272A; }
-  .btn-light { background: var(--surface); color: var(--ink); }
-  .btn-light:hover { background: #E4E4E7; }
-  .btn-white { background: #fff; color: var(--ink); }
-  .btn-sm { padding: 9px 18px; font-size: 14px; }
-
-  /* ---------- hero ---------- */
-  header.container { padding: 160px 24px 0; text-align: center; }
-  header h1 {
-    font-size: clamp(42px, 6.4vw, 74px);
-    max-width: 15ch; margin: 0 auto;
-  }
-  header .sub {
-    color: var(--soft); font-size: clamp(17px, 2vw, 20px);
-    max-width: 52ch; margin: 24px auto 0;
-  }
-  .cta-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
-  .trust { color: var(--soft); font-size: 13.5px; margin-top: 16px; }
-  .hero-shot { margin: 64px auto 0; }
-  .frame {
-    border: 1px solid var(--border);
-    border-radius: var(--r-card);
-    overflow: hidden;
-    box-shadow: 0 24px 60px -24px rgba(24,24,27,0.18);
-    background: var(--surface);
-  }
-
-  /* ---------- big statement ---------- */
-  .statement.container { padding: 140px 24px 40px; text-align: center; }
-  .statement p {
-    font-family: "Inter Tight", sans-serif; font-weight: 500;
-    letter-spacing: -0.03em; line-height: 1.15;
-    font-size: clamp(30px, 4.6vw, 52px);
-    max-width: 22ch; margin: 0 auto; text-wrap: balance;
-  }
-  .statement .dim { color: #A1A1AA; }
-
-  /* ---------- sections ---------- */
-  section.container { padding: 90px 24px; }
-  .kicker {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--tint); color: #0284C7;
-    border-radius: 999px; padding: 6px 14px;
-    font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
-    margin-bottom: 20px;
-  }
-  section h2 { font-size: clamp(30px, 4vw, 44px); max-width: 20ch; }
-  section .lede { color: var(--soft); font-size: 17px; max-width: 56ch; margin-top: 16px; }
-
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 44px; }
-  @media (max-width: 860px) { .cards { grid-template-columns: 1fr; } }
-  .card {
-    background: var(--surface); border-radius: var(--r-card);
-    padding: 30px 28px;
-  }
-  .card .glyph {
-    width: 44px; height: 44px; border-radius: 14px;
-    background: #fff; border: 1px solid var(--border);
-    display: grid; place-items: center; margin-bottom: 18px;
-    font-size: 20px;
-  }
-  .card h3 { font-size: 19px; margin-bottom: 8px; letter-spacing: -0.02em; }
-  .card p { color: var(--body); font-size: 15px; }
-
-  .split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 56px; align-items: center; margin-top: 44px; }
-  @media (max-width: 860px) { .split { grid-template-columns: 1fr; gap: 32px; } }
-  .split ul { list-style: none; padding: 0; margin-top: 24px; display: grid; gap: 14px; }
-  .split li { display: flex; gap: 12px; color: var(--body); font-size: 15.5px; }
-  .split li::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 99px; background: var(--accent); margin-top: 8px; }
-
-  /* ---------- tinted band ---------- */
-  .band {
-    background: var(--tint); border-radius: var(--r-card);
-    padding: clamp(40px, 6vw, 72px);
-    display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;
-  }
-  @media (max-width: 860px) { .band { grid-template-columns: 1fr; } }
-  .band h2 { font-size: clamp(28px, 3.6vw, 40px); }
-  .band p { color: #075985; margin-top: 14px; font-size: 16px; }
-  .platforms { display: grid; gap: 12px; }
-  .platform {
-    background: rgba(255,255,255,0.75); border-radius: 18px;
-    padding: 16px 20px; display: flex; justify-content: space-between; align-items: baseline;
-    font-weight: 500; font-size: 15px;
-  }
-  .platform span { color: var(--soft); font-weight: 400; font-size: 13.5px; }
-
-  /* ---------- downloads ---------- */
-  .tiers { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 44px; }
-  @media (max-width: 860px) { .tiers { grid-template-columns: 1fr; } }
-  .tier {
-    border-radius: var(--r-card); padding: 36px 32px;
-    border: 1px solid var(--border);
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .tier.emph { background: var(--ink); color: #fff; border-color: var(--ink); }
-  .tier .os { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--soft); }
-  .tier.emph .os { color: #A1A1AA; }
-  .tier .name { font-family: "Inter Tight", sans-serif; font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
-  .tier p { font-size: 15px; color: var(--body); margin: 8px 0 22px; }
-  .tier.emph p { color: #D4D4D8; }
-  .tier .btn { align-self: flex-start; margin-top: auto; }
-  .tier .btn-row { margin-top: auto; display: flex; gap: 10px; flex-wrap: wrap; }
-  .tier .btn-row .btn { margin-top: 0; align-self: auto; }
-  .fineprint { color: var(--soft); font-size: 13px; margin-top: 18px; }
-
-  /* ---------- faq ---------- */
-  .faq { max-width: 760px; margin: 44px auto 0; }
-  details { border-bottom: 1px solid var(--border); }
-  summary {
-    cursor: pointer; list-style: none;
-    display: flex; justify-content: space-between; align-items: center; gap: 16px;
-    padding: 22px 4px; font-weight: 500; font-size: 16.5px;
-  }
-  summary::-webkit-details-marker { display: none; }
-  summary::after { content: "+"; font-size: 22px; color: var(--soft); transition: transform 0.2s; }
-  details[open] summary::after { transform: rotate(45deg); }
-  details p { color: var(--body); font-size: 15px; padding: 0 4px 22px; max-width: 62ch; }
-
-  /* ---------- final cta ---------- */
-  .final.container { text-align: center; padding: 120px 24px 130px; }
-  .final h2 { font-size: clamp(34px, 5vw, 56px); margin: 0 auto; }
-  .final .icon { width: 84px; height: 84px; margin: 0 auto 28px; }
-
-  /* ---------- footer ---------- */
-  footer { border-top: 1px solid var(--border); padding: 56px 0 40px; }
-  .foot-grid { display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
-  .foot-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
-  .foot-brand img { width: 24px; height: 24px; }
-  .foot-cols { display: flex; gap: 72px; flex-wrap: wrap; }
-  .foot-col { display: grid; gap: 10px; font-size: 14px; align-content: start; }
-  .foot-col b { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--soft); font-weight: 600; margin-bottom: 4px; }
-  .foot-col a { color: var(--body); }
-  .foot-col a:hover { color: var(--ink); }
-  .foot-bottom {
-    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    margin-top: 48px; color: var(--soft); font-size: 13.5px;
-  }
-  .status { display: inline-flex; align-items: center; gap: 8px; }
-  .status::before { content: ""; width: 8px; height: 8px; border-radius: 99px; background: #22C55E; }
-
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn:hover { transform: none; } }
-</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Noto+Sans+KR:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="assets/site.css?v=20260912">
+<script src="assets/site.js?v=20260912" defer></script>
 </head>
 <body>
+<svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><defs><symbol id="icon-sheet" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h2v3H9zM14 7h2v3h-2zM9 14h2v3H9zM14 14h2v3h-2z"/></symbol><symbol id="icon-type" viewBox="0 0 24 24"><path d="M6 7V4h12v3M12 4v16M9 20h6M3 11v7M21 11v7M1 11h4M19 18h4"/></symbol><symbol id="icon-ruler" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M8 3v3M13 3v3M18 3v3M3 14h3M3 18h3"/></symbol><symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol><symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></symbol><symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol><symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol><symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"/></symbol><symbol id="icon-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol><symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol><symbol id="icon-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></symbol><symbol id="icon-data" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M3 15h18M15 9v12"/></symbol><symbol id="icon-serial" viewBox="0 0 24 24"><path d="M9 3 7 21M17 3l-2 18M3 9h18M2 15h18"/></symbol><symbol id="icon-print" viewBox="0 0 24 24"><path d="M6 8V3h12v5M6 17H3V9h18v8h-3M6 14h12v7H6zM17 11h1"/></symbol><symbol id="icon-mac" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8M12 17v4M3 13h18"/></symbol><symbol id="icon-windows" viewBox="0 0 24 24"><path d="M3 5.5 10.5 4v7H3ZM13.5 3.5 21 2v9h-7.5ZM3 13h7.5v7L3 18.5Zm10.5 0H21v9l-7.5-1.5Z"/></symbol><symbol id="icon-linux" viewBox="0 0 24 24"><path d="M8 10V7a4 4 0 0 1 8 0v3l3 8-4 3H9l-4-3Z"/><path d="m10 10 2 2 2-2M9 16l-2 4M15 16l2 4M10 7h.01M14 7h.01"/></symbol><symbol id="icon-desktop" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol></defs></svg>
+<a class="skip-link" href="#main">Skip to content</a>
 
-<nav>
+<nav aria-label="Main navigation">
   <div class="container nav-inner">
     <a class="brand" href="#"><img src="assets/icon.svg" alt=""> iLabel Studio</a>
     <div class="nav-links">
       <a class="hide-sm" href="#features">Features</a>
       <a class="hide-sm" href="#downloads">Downloads</a>
       <a class="hide-sm" href="#faq">FAQ</a>
-      <a href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
-      <a class="btn btn-light btn-sm" href="ko/" lang="ko" title="한국어로 보기">🇰🇷 한국어</a>
-      <a class="btn btn-dark btn-sm" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download</a>
+      <a class="nav-github" href="https://github.com/JAEYOONSUNG/iLabel-Studio">GitHub</a>
+      <a class="btn btn-light btn-sm" href="ko/" lang="ko" title="한국어로 보기"><svg class="ui-icon icon-globe" aria-hidden="true" focusable="false"><use href="#icon-globe"/></svg> 한국어</a>
+      <a class="btn btn-dark btn-sm" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download</span></a>
     </div>
   </div>
+<div class="scroll-progress" aria-hidden="true"></div>
 </nav>
+<main id="main">
 
-<header class="container">
-  <h1>Design, number, and print labels in one place</h1>
+<header class="hero">
+<div class="container">
+<div class="hero-layout"><div class="hero-copy">
+<p class="eyebrow">iLabel Studio / Precision in print</p>
+  <h1>Design. Number.<br>Print.<br><span>All in place.</span></h1>
   <p class="sub">iLabel Studio is a precision editor and printer for iLabel sheets from label.kr — plus custom sheets and roll labels. Rich text, merge data, serial numbering, and capture-based print runs, all in one project format.</p>
   <div class="cta-row">
-    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
-    <a class="btn btn-light" href="#downloads">Windows &amp; Linux</a>
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download for macOS</span></a>
+    <a class="btn btn-light" href="#downloads"><svg class="ui-icon icon-arrow" aria-hidden="true" focusable="false"><use href="#icon-arrow"/></svg><span>Windows &amp; Linux</span></a>
   </div>
   <p class="trust">Free download · macOS 14+, Windows x64, Linux x64</p>
-  <div class="hero-shot frame">
-    <img src="https://github.com/user-attachments/assets/d5e5a715-598e-4bdb-a431-95a3d428d587" alt="iLabel Studio label editor with canvas, page preview, numbering, and capture queue" loading="eager">
+  </div><div class="hero-art">
+      <svg class="studio-svg" viewBox="0 0 560 500" role="img" aria-labelledby="studio-title studio-desc">
+        <title id="studio-title">From one label to a print-ready sheet</title>
+        <desc id="studio-desc">Dimension guides frame a label, then ten serial-numbered labels align on a sheet for printing.</desc>
+        <defs>
+          <pattern id="draft-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".65" fill="#bbd2e3"/></pattern>
+          <linearGradient id="board-light" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fcff"/><stop offset="1" stop-color="#e8f2f9"/></linearGradient>
+          <linearGradient id="label-paper" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#f7fafc"/></linearGradient>
+          <linearGradient id="scan-light" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#159eee" stop-opacity="0"/><stop offset="1" stop-color="#159eee" stop-opacity=".18"/></linearGradient>
+          <filter id="paper-shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#315e85" flood-opacity=".12"/></filter>
+          <clipPath id="sheet-clip"><rect x="350" y="146" width="165" height="267" rx="3"/></clipPath>
+        </defs>
+        <rect x="14" y="28" width="532" height="446" rx="22" fill="url(#board-light)" stroke="#d6e6f1"/>
+        <rect x="15" y="76" width="530" height="364" fill="url(#draft-grid)"/>
+        <path d="M14 76h532M14 440h532" stroke="#d6e6f1"/>
+        <circle cx="38" cy="52" r="4" fill="#168ccb"/><text x="52" y="56" fill="#52728c" font-size="10" letter-spacing="1.2">LABEL WORKSPACE</text>
+        <text x="520" y="56" fill="#52728c" font-size="9" text-anchor="end">1:1 / mm</text>
+        <g fill="none" stroke="#94b8d1" stroke-width="1"><path d="M40 98v10m20-10v5m20-5v5m20-5v5m20-5v10m20-10v5m20-5v5m20-5v5m20-5v10m20-10v5m20-5v5m20-5v5m20-5v10"/><path d="M36 135h10m-10 20h5m-5 20h5m-5 20h5m-5 20h10m-10 20h5m-5 20h5m-5 20h5m-5 20h10"/></g>
+        <text x="55" y="135" fill="#6c879e" font-size="8">DESIGN</text>
+        <g stroke="#75b3db" stroke-width="1" fill="none" class="registration-line"><path d="M69 180v-29m245 29v-29M69 158h245M59 191H48m11 114H48M52 191v114"/><path d="m69 158 5-3m-5 3 5 3m240-3-5-3m5 3-5 3"/></g>
+        <rect x="154" y="147" width="78" height="21" rx="5" fill="#edf7fe"/>
+        <text x="193" y="161" text-anchor="middle" fill="#167bb7" font-size="10">63.4 mm</text>
+        <g filter="url(#paper-shadow)"><rect x="68" y="190" width="247" height="116" rx="11" fill="url(#label-paper)" stroke="#bdd9ec"/></g>
+        <path d="M85 219h3m3 0h8m3 0h3m3 0h7m3 0h4m3 0h3m3 0h9" stroke="#1d729f" stroke-width="17"/>
+        <text class="label-name" x="85" y="258" fill="#183650" font-size="22" font-weight="600" letter-spacing="-.8">Sample collection</text>
+        <text x="85" y="286" fill="#648098" font-size="10">ILS-001</text><text x="293" y="286" fill="#648098" font-size="9" text-anchor="end">12 SEP 2026</text>
+        <g class="editor-selection" stroke="#078aca" fill="#fff" stroke-width="1.25"><rect x="80" y="235" width="225" height="31" rx="1" fill="none"/><rect x="77.5" y="232.5" width="5" height="5"/><rect x="302.5" y="232.5" width="5" height="5"/><rect x="77.5" y="263.5" width="5" height="5"/><rect x="302.5" y="263.5" width="5" height="5"/></g>
+        <g><rect x="94" y="330" width="194" height="36" rx="8" fill="#fff" stroke="#d2e3ef"/><text x="108" y="352" fill="#2e6689" font-size="11">Aa</text><path d="M138 339v18M204 339v18" stroke="#d6e3ed"/><text x="152" y="352" fill="#5b7990" font-size="10">12 pt</text><rect x="217" y="341" width="13" height="13" rx="3" fill="#193b58"/><rect x="239" y="341" width="13" height="13" rx="3" fill="#078aca"/><rect x="261" y="341" width="13" height="13" rx="3" fill="#e1eff8"/></g>
+        <path class="connector-flow" d="M315 248h22q7 0 7-7v-34" stroke="#159de0" stroke-width="1.5" stroke-dasharray="4 4" fill="none"/>
+        <text x="355" y="123" fill="#6c879e" font-size="8">PRINT SHEET</text>
+        <g filter="url(#paper-shadow)"><rect x="355" y="151" width="165" height="267" rx="5" fill="#e0eaf2"/><rect x="348" y="143" width="165" height="267" rx="5" fill="#fff" stroke="#c7dbe9"/></g>
+        <g class="sheet-cell" style="--cell-delay:0.09s"><rect x="361" y="160" width="65" height="40" rx="5" fill="#e6f4fc" stroke="#c8deec"/><path d="M370 171h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="370" y="189" fill="#245a7c" font-size="10">ILS-001</text></g><g class="sheet-cell" style="--cell-delay:0.18s"><rect x="435" y="160" width="65" height="40" rx="5" fill="#e6f4fc" stroke="#c8deec"/><path d="M444 171h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="444" y="189" fill="#245a7c" font-size="10">ILS-002</text></g><g class="sheet-cell" style="--cell-delay:0.27s"><rect x="361" y="209" width="65" height="40" rx="5" fill="#e6f4fc" stroke="#c8deec"/><path d="M370 220h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="370" y="238" fill="#245a7c" font-size="10">ILS-003</text></g><g class="sheet-cell" style="--cell-delay:0.36s"><rect x="435" y="209" width="65" height="40" rx="5" fill="#e6f4fc" stroke="#c8deec"/><path d="M444 220h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="444" y="238" fill="#245a7c" font-size="10">ILS-004</text></g><g class="sheet-cell" style="--cell-delay:0.44999999999999996s"><rect x="361" y="258" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M370 269h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="370" y="287" fill="#245a7c" font-size="10">ILS-005</text></g><g class="sheet-cell" style="--cell-delay:0.54s"><rect x="435" y="258" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M444 269h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="444" y="287" fill="#245a7c" font-size="10">ILS-006</text></g><g class="sheet-cell" style="--cell-delay:0.63s"><rect x="361" y="307" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M370 318h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="370" y="336" fill="#245a7c" font-size="10">ILS-007</text></g><g class="sheet-cell" style="--cell-delay:0.72s"><rect x="435" y="307" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M444 318h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="444" y="336" fill="#245a7c" font-size="10">ILS-008</text></g><g class="sheet-cell" style="--cell-delay:0.8099999999999999s"><rect x="361" y="356" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M370 367h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="370" y="385" fill="#245a7c" font-size="10">ILS-009</text></g><g class="sheet-cell" style="--cell-delay:0.8999999999999999s"><rect x="435" y="356" width="65" height="40" rx="5" fill="#f3f7fa" stroke="#c8deec"/><path d="M444 367h21" stroke="#6b99b7" stroke-width="2"/><text class="serial-data" x="444" y="385" fill="#245a7c" font-size="10">ILS-010</text></g>
+        <g clip-path="url(#sheet-clip)"><g class="print-scan"><rect x="350" y="127" width="164" height="24" fill="url(#scan-light)"/><path d="M350 151h164" stroke="#0a93da" stroke-width="1.5"/></g></g>
+        <g><rect x="67" y="389" width="223" height="28" rx="6" fill="#e7f3fc" stroke="#cce4f4"/><text x="79" y="407" fill="#2b769e" font-size="9">{{serial}}</text><path d="M152 403h18m-4-3 4 3-4 3" stroke="#80abc7" fill="none"/><text class="serial-data" x="181" y="407" fill="#2b769e" font-size="9">001 — 010</text></g>
+        <g fill="#668198" font-size="8"><text x="34" y="459">63.4 × 38.2 mm</text><text x="527" y="459" text-anchor="end">DESIGN → MERGE → PRINT</text></g>
+      </svg>
+      <div class="motion-toolbar"><span class="motion-caption">One design. Every label in place.</span><button class="motion-toggle" type="button" hidden><svg class="ui-icon icon-pause" aria-hidden="true" focusable="false"><use href="#icon-pause"/></svg><span></span></button></div>
+    </div></div>
+<div class="hero-shot frame" id="editor">
+<div class="window-bar"><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>iLabel Studio</span><span class="window-note">THE ACTUAL APP</span></div>
+    <img src="assets/editor.jpg" width="1800" height="993" alt="iLabel Studio label editor with canvas, page preview, numbering, and capture queue" loading="eager">
   </div>
+<div class="shot-caption"><span><svg class="ui-icon icon-sheet" aria-hidden="true" focusable="false"><use href="#icon-sheet"/></svg>1,006 sheet formats</span><span><svg class="ui-icon icon-ruler" aria-hidden="true" focusable="false"><use href="#icon-ruler"/></svg>Millimeter precision</span><span><svg class="ui-icon icon-layers" aria-hidden="true" focusable="false"><use href="#icon-layers"/></svg>One project format</span></div>
+</div>
 </header>
 
 <div class="statement container">
@@ -256,41 +101,30 @@
 </div>
 
 <section id="features" class="container">
-  <span class="kicker">Editor</span>
+  <span class="kicker"><svg class="ui-icon icon-type" aria-hidden="true" focusable="false"><use href="#icon-type"/></svg>Editor</span>
   <h2>Whatever's on your sheet, design it</h2>
   <p class="lede">Pick a format, drop in text and images, and see exactly what each printed cell contains — before a single label leaves the tray.</p>
   <div class="cards">
-    <div class="card">
-      <div class="glyph">🗂️</div>
-      <h3>1,006 sheet formats built in</h3>
-      <p>The full iLabel catalog ships with the app, alongside fully custom sheet geometry and roll labels. Active cells match the real label shape, circles included.</p>
-    </div>
-    <div class="card">
-      <div class="glyph">✏️</div>
-      <h3>Rich text, down to the character</h3>
-      <p>Fonts, embedded fonts, bold, italic, underline, strikethrough, super- and subscript, text and highlight colors — applied per selection and rendered identically in print.</p>
-    </div>
-    <div class="card">
-      <div class="glyph">📐</div>
-      <h3>Millimeter-accurate placement</h3>
-      <p>Frame spacing, alignment, and per-cell placement are set in real units, so what lands on paper is what you laid out on the canvas.</p>
-    </div>
+    <article class="card"><svg class="feature-art" viewBox="0 0 360 204" aria-hidden="true" focusable="false"><g fill="none" stroke="#c3d6e5"><path d="M40 171h280M51 40v132M309 40v132" stroke-dasharray="3 5"/></g><g transform="rotate(-9 145 108)"><rect x="97" y="41" width="103" height="133" rx="8" fill="#dce9f3" stroke="#c2d8e8"/></g><g class="hover-part"><rect x="125" y="29" width="111" height="144" rx="9" fill="#fff" stroke="#a9cbe1"/><g fill="#e6f3fc" stroke="#8ebddb"><rect x="138" y="44" width="37" height="30" rx="5"/><rect x="184" y="44" width="37" height="30" rx="5"/><rect x="138" y="84" width="37" height="30" rx="5"/><rect x="184" y="84" width="37" height="30" rx="5"/><rect x="138" y="124" width="37" height="30" rx="5"/><rect x="184" y="124" width="37" height="30" rx="5"/></g><rect x="184" y="84" width="37" height="30" rx="5" fill="#087dc4"/><path d="m196 99 5 5 9-11" fill="none" stroke="#fff" stroke-width="1.5"/></g><circle cx="268" cy="136" r="26" fill="#fff" stroke="#a9cbe1"/><circle cx="268" cy="136" r="17" fill="#e6f3fc" stroke="#8ebddb"/><text x="40" y="190" fill="#57738b" font-size="9">SHEET / CIRCLE / ROLL</text></svg><div class="card-copy"><div class="card-heading"><span class="glyph"><svg class="ui-icon icon-sheet" aria-hidden="true" focusable="false"><use href="#icon-sheet"/></svg></span><h3>1,006 sheet formats built in</h3></div><p>The full iLabel catalog ships with the app, alongside fully custom sheet geometry and roll labels. Active cells match the real label shape, circles included.</p></div></article>
+    <article class="card"><svg class="feature-art" viewBox="0 0 360 204" aria-hidden="true" focusable="false"><rect x="49" y="43" width="262" height="124" rx="9" fill="#fff" stroke="#bfd6e7"/><path d="M49 76h262" stroke="#dbe7ef"/><text x="65" y="65" fill="#50718a" font-size="10">Manrope</text><path d="m120 58 3 3 3-3M144 53v15M211 53v15" fill="none" stroke="#c1d6e5"/><text x="160" y="65" fill="#50718a" font-size="10">24 pt</text><rect x="224" y="54" width="13" height="13" rx="3" fill="#087dc4"/><rect x="246" y="54" width="13" height="13" rx="3" fill="#193b58"/><g class="hover-part"><rect x="74" y="92" width="202" height="51" rx="3" fill="#e3f2fc"/><text class="type-sample" x="85" y="129" fill="#1b5278" font-family="Manrope, sans-serif" font-size="33" font-weight="600" letter-spacing="-1.4">Made by you.</text><path class="art-stroke" d="M85 148h137" stroke="#078aca" stroke-width="2"/><path d="M276 90v56m-3-56h6m-6 56h6" stroke="#087dc4" stroke-width="1.5"/></g><text x="40" y="190" fill="#57738b" font-size="9">EVERY CHARACTER, CONSIDERED</text></svg><div class="card-copy"><div class="card-heading"><span class="glyph"><svg class="ui-icon icon-type" aria-hidden="true" focusable="false"><use href="#icon-type"/></svg></span><h3>Rich text, down to the character</h3></div><p>Fonts, embedded fonts, bold, italic, underline, strikethrough, super- and subscript, text and highlight colors — applied per selection and rendered identically in print.</p></div></article>
+    <article class="card"><svg class="feature-art" viewBox="0 0 360 204" aria-hidden="true" focusable="false"><defs><pattern id="feature-grid" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M16 0H0v16" fill="none" stroke="#d2e2ef" stroke-width=".7"/></pattern></defs><rect x="44" y="25" width="272" height="149" fill="url(#feature-grid)"/><g stroke="#7db4d7" fill="none"><path class="art-stroke" d="M74 56h212M91 37v129M269 37v129M62 76h233M62 148h233" stroke-dasharray="3 3"/><path d="M92 48h176m-176 0 5-3m-5 3 5 3m171-3-5-3m5 3-5 3M72 77v71m0-71-3 5m3-5 3 5m-3 66-3-5m3 5 3-5"/></g><rect x="141" y="36" width="79" height="23" rx="4" fill="#e8f3fc"/><text x="180" y="51" fill="#167bb7" font-size="11" text-anchor="middle">63.4 mm</text><g class="hover-part"><rect x="92" y="77" width="177" height="71" rx="7" fill="#fff" stroke="#087dc4"/><path d="M164 105h32m-16-16v32" stroke="#b2d2e7"/><circle cx="180" cy="105" r="3" fill="#087dc4"/><path d="M103 136h36m83 0h36" stroke="#b2d2e7"/></g><text x="40" y="190" fill="#57738b" font-size="9">REAL UNITS. EXACT PLACEMENT.</text></svg><div class="card-copy"><div class="card-heading"><span class="glyph"><svg class="ui-icon icon-ruler" aria-hidden="true" focusable="false"><use href="#icon-ruler"/></svg></span><h3>Millimeter-accurate placement</h3></div><p>Frame spacing, alignment, and per-cell placement are set in real units, so what lands on paper is what you laid out on the canvas.</p></div></article>
   </div>
 </section>
 
 <section class="container">
-  <span class="kicker">Data</span>
+  <span class="kicker"><svg class="ui-icon icon-data" aria-hidden="true" focusable="false"><use href="#icon-data"/></svg>Data</span>
   <div class="split">
     <div>
       <h2>Serials, merge data, and capture runs</h2>
       <ul>
-        <li>Number labels with Start, End, Step, and Repeat — or generate one label per row of an imported CSV.</li>
-        <li>Merge tokens like <code>{{serial}}</code> fill in per label at print time.</li>
-        <li>Capture consecutive print runs into a queue, stage empty positions, and use every last label on a partially used sheet.</li>
+        <li><svg class="ui-icon icon-serial" aria-hidden="true" focusable="false"><use href="#icon-serial"/></svg><span>Number labels with Start, End, Step, and Repeat — or generate one label per row of an imported CSV.</span></li>
+        <li><svg class="ui-icon icon-data" aria-hidden="true" focusable="false"><use href="#icon-data"/></svg><span>Merge tokens like <code>{{serial}}</code> fill in per label at print time.</span></li>
+        <li><svg class="ui-icon icon-layers" aria-hidden="true" focusable="false"><use href="#icon-layers"/></svg><span>Capture consecutive print runs into a queue, stage empty positions, and use every last label on a partially used sheet.</span></li>
       </ul>
     </div>
-    <div class="frame">
-      <img src="assets/capture-queue-workflow.gif" alt="Creating label content, adjusting quantities, and capturing multiple print runs" loading="lazy">
+    <div class="frame workflow-frame">
+      <img id="workflow-demo" src="assets/capture-queue-poster.png" data-animation="assets/capture-queue-workflow.gif" data-poster="assets/capture-queue-poster.png" width="960" height="679" alt="Creating label content, adjusting quantities, and capturing multiple print runs" loading="lazy">
+      <div class="demo-bar"><span>Design → Capture → Print</span><button type="button" class="demo-toggle" aria-controls="workflow-demo" aria-pressed="false" hidden><svg class="ui-icon icon-play" aria-hidden="true" focusable="false"><use href="#icon-play"/></svg><span>Play walkthrough</span></button><noscript><a href="assets/capture-queue-workflow.gif">View walkthrough</a></noscript></div>
     </div>
   </div>
 </section>
@@ -302,30 +136,30 @@
       <p>iLabel Studio is a native SwiftUI app on macOS and a feature-equivalent desktop app on Windows and Linux. Every edition shares the same project format — rich text, embedded fonts, merge data, numbering, placement, and captured print queues travel with the file.</p>
     </div>
     <div class="platforms">
-      <div class="platform">macOS <span>Universal — Apple silicon &amp; Intel</span></div>
-      <div class="platform">Windows <span>NSIS installer &amp; portable</span></div>
-      <div class="platform">Linux <span>AppImage &amp; Debian package</span></div>
+      <div class="platform"><svg class="ui-icon icon-mac" aria-hidden="true" focusable="false"><use href="#icon-mac"/></svg><b>macOS</b><span>Universal — Apple silicon &amp; Intel</span></div>
+      <div class="platform"><svg class="ui-icon icon-windows" aria-hidden="true" focusable="false"><use href="#icon-windows"/></svg><b>Windows</b><span>NSIS installer &amp; portable</span></div>
+      <div class="platform"><svg class="ui-icon icon-linux" aria-hidden="true" focusable="false"><use href="#icon-linux"/></svg><b>Linux</b><span>AppImage &amp; Debian package</span></div>
     </div>
   </div>
 </section>
 
 <section id="downloads" class="container">
-  <span class="kicker">Downloads</span>
+  <span class="kicker"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg>Downloads</span>
   <h2>Free. No account, no trial clock.</h2>
   <div class="tiers">
-    <div class="tier emph">
+    <div class="tier emph"><svg class="ui-icon icon-mac" aria-hidden="true" focusable="false"><use href="#icon-mac"/></svg>
       <span class="os">macOS 14+</span>
       <span class="name">iLabel Studio for Mac</span>
       <p>Download the DMG, drag iLabel Studio to Applications, and launch. Universal binary for Apple silicon and Intel.</p>
-      <a class="btn btn-white" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download DMG</a>
+      <a class="btn btn-white" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download DMG</span></a>
     </div>
-    <div class="tier">
+    <div class="tier"><svg class="ui-icon icon-desktop" aria-hidden="true" focusable="false"><use href="#icon-desktop"/></svg>
       <span class="os">Windows &amp; Linux</span>
       <span class="name">Desktop edition</span>
       <p>Direct download of the latest build, packaged on every commit: NSIS installer and portable EXE for Windows, AppImage and DEB for Linux.</p>
       <div class="btn-row">
-        <a class="btn btn-dark" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip">Download for Windows</a>
-        <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip">Download for Linux</a>
+        <a class="btn btn-dark" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download for Windows</span></a>
+        <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download for Linux</span></a>
       </div>
     </div>
   </div>
@@ -333,27 +167,27 @@
 </section>
 
 <section id="faq" class="container">
-  <span class="kicker">FAQ</span>
+  <span class="kicker"><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg>FAQ</span>
   <h2>Questions, answered</h2>
   <div class="faq">
     <details>
-      <summary>Which label sheets does it support?</summary>
+      <summary><span>Which label sheets does it support?</span><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg></summary>
       <p>All 1,006 official iLabel formats from label.kr are built in, and you can define fully custom sheet geometry or roll labels when your stock isn't in the catalog.</p>
     </details>
     <details>
-      <summary>I was using iLabel2Mac. Do my projects still open?</summary>
+      <summary><span>I was using iLabel2Mac. Do my projects still open?</span><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg></summary>
       <p>Yes. iLabel Studio is the same app renamed — quit the old iLabel2Mac, install iLabel Studio, and remove the old bundle. Existing projects and preferences remain compatible.</p>
     </details>
     <details>
-      <summary>Are projects portable between Mac, Windows, and Linux?</summary>
+      <summary><span>Are projects portable between Mac, Windows, and Linux?</span><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg></summary>
       <p>Yes. Every edition shares one project format, including rich text, embedded fonts, merge data, numbering, placement, and captured print queues.</p>
     </details>
     <details>
-      <summary>How does printing on a partially used sheet work?</summary>
+      <summary><span>How does printing on a partially used sheet work?</span><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg></summary>
       <p>Stage empty positions in Page Preview, then capture the run. The capture queue remembers which cells are gone, so the next run starts exactly where the last one ended.</p>
     </details>
     <details>
-      <summary>Does it cost anything?</summary>
+      <summary><span>Does it cost anything?</span><svg class="ui-icon icon-plus" aria-hidden="true" focusable="false"><use href="#icon-plus"/></svg></summary>
       <p>No. Download it from GitHub and print.</p>
     </details>
   </div>
@@ -363,12 +197,13 @@
   <img class="icon" src="assets/icon.svg" alt="">
   <h2>Make more of every sheet you print.</h2>
   <div class="cta-row">
-    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest">Download for macOS</a>
-    <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip">Windows</a>
-    <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip">Linux</a>
+    <a class="btn btn-dark" href="https://github.com/JAEYOONSUNG/iLabel-Studio/releases/latest"><svg class="ui-icon icon-download" aria-hidden="true" focusable="false"><use href="#icon-download"/></svg><span>Download for macOS</span></a>
+    <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-windows-x64.zip"><svg class="ui-icon icon-windows" aria-hidden="true" focusable="false"><use href="#icon-windows"/></svg><span>Windows</span></a>
+    <a class="btn btn-light" href="https://nightly.link/JAEYOONSUNG/iLabel-Studio/workflows/desktop/main/ilabel-studio-linux-x64.zip"><svg class="ui-icon icon-linux" aria-hidden="true" focusable="false"><use href="#icon-linux"/></svg><span>Linux</span></a>
   </div>
 </div>
 
+</main>
 <footer>
   <div class="container">
     <div class="foot-grid">
