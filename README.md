@@ -26,43 +26,31 @@ Installed copies check for a new version on launch and every six hours, then off
 
 Upgrading from the former `iLabel2Mac.app`? Quit the old app, install `iLabel Studio.app`, then remove the old app bundle. Existing projects and saved app preferences remain compatible.
 
-## What's new
+## Two designs, one sheet, one print job
 
-**0.3.3**
+![macOS walkthrough: pick a sheet, style the label, capture two runs, reposition one](docs/assets/capture-queue-workflow-macos.gif)
 
-- Right-click a captured label in the page preview to **Edit**, **Reposition**, or **Remove** that batch, or **Clear All Captures**. The queue actions no longer live only in the queue list.
-- New projects start on the label stock you last worked with, whether an official format, a preset, or hand-edited geometry, instead of the factory format `680`.
-- Wi-Fi printing keeps searching for the printer's network after you press **Print** and joins the moment it appears, so the queued job delivers automatically. The status bar shows the search, and the Connect test gets its own window.
+The recording is the macOS app on iLabel sheet `237` (3 × 7 labels, 63.4 × 38.2 mm). Nothing here needs a dialog or a second window.
 
-**0.3.2**
+1. **Pick the sheet.** Every new project opens on the stock you used last. **Choose Format…** searches all 1,006 iLabel sheets by code, label size, or layout.
+2. **Click the label and type.** A text object appears centered on the label. Merge tokens such as `{{serial}}` and `{{date}}` are plain text and fill in per label.
+3. **Style any selection.** Select a word and change its font, size, color, bold, italic, underline, superscript, or highlight. The rest of the text keeps its own style, and the print preview updates as you type.
+4. **Drop in emoji and symbols.** The **Emoji** button inserts from a quick palette, and **More Symbols…** opens the macOS character viewer, so 🧪, ℃, →, or Greek letters go straight onto the label.
+5. **Set the quantity.** **Start**, **End**, **Step**, and **Repeat** describe the run. `End 4 × Repeat 2` prints numbers 1 to 4 twice. With a CSV loaded, each row becomes one label.
+6. **Capture.** **Capture Current Setup** locks the artwork, numbering, CSV rows, page, and start position together, and the page preview colors the cells the run will occupy.
+7. **Stage the next run.** Click any empty cell. Change the text, colors, and quantity for the second design, then capture again. The queue now holds two setups on one sheet.
+8. **Move things around.** Right-click a captured cell to **Edit**, **Reposition**, or **Remove** that run. Reposition picks the batch up and drops it whole on the next empty cell you click.
+9. **Print Captures** sends the whole queue as one multi-page job. The sheet stays locked while runs are queued so nothing shifts under them.
 
-- Captured setups can be edited: **Edit** checks a batch out of the queue and restores its label, numbering, CSV rows, and placement as the live draft. **Update Capture** returns it with the same identity, queue order, page, and offsets. **Cancel** restores the pre-edit snapshot untouched.
-- Captured setups can be repositioned: **Reposition** arms a move mode in which the next click on an empty page slot carries the whole batch there. Conflicts with other captures are refused and the mode stays armed so you can pick another spot.
-
-**0.3.0**
-
-- Ask-first auto-update across all editions.
-- Click-to-type and selection highlights in the Windows/Linux edition.
-
-## Quick workflow: create a label and capture consecutive runs
-
-![Create label content, adjust quantities, and capture multiple print runs](docs/assets/capture-queue-workflow.gif)
-
-The light-theme demo uses the Windows/Linux edition. It adds a Text object, types `Sample {{serial}}`, switches to Page Preview, captures **8 labels** (`End 4 × Repeat 2`), then stages an empty position and captures **3 more labels** (`End 3 × Repeat 1`).
-
-1. Add **Text**, enter the label content or merge tokens, then switch to **Page Preview**. The large label canvas shows exactly what each printed cell contains.
-2. Set the quantity with **Start**, **End**, **Step**, and **Repeat**. With CSV data, one label is generated per imported row.
-3. Click a label cell to choose where the run starts, then choose **Capture Current Setup**. The artwork, data, quantity, page, and start position are locked together.
-4. Click another empty label cell to stage the next capture. Use **Next** if you want to start on a blank sheet; the capture button stays disabled until a valid position is staged.
-5. Adjust the next run's quantity, then choose **Capture Current Setup** again.
-6. Right-click a captured cell to edit, reposition, or remove that batch, then choose **Print Captures** to print the complete queue as one multi-page job.
+The Windows/Linux edition follows the same steps. [Watch it in the desktop edition](docs/assets/capture-queue-workflow.gif).
 
 ## Features
 
 - Native SwiftUI app for macOS and a feature-equivalent Electron app for Windows/Linux
-- 1,006 official iLabel paper formats from `label.kr`, plus editable custom sheet/roll geometry; new projects open on your last-used stock
+- 1,006 official iLabel paper formats from `label.kr`, searchable by code, label size, or layout, plus editable custom sheet/roll geometry; new projects open on your last-used stock
 - Text, shape, image, QR, and Code128 elements
-- Selection-level rich text: font, size, bold, italic, underline, and RGBA color
+- Selection-level rich text: font, size, bold, italic, underline, strikethrough, superscript, subscript, text color, and highlight, each applied to just the selected characters
+- Emoji quick palette plus the macOS character viewer for symbols, and saved text snippets for phrases you reuse
 - macOS RTF compatibility and project-embedded TTF, OTF, WOFF, WOFF2, TTC, and OTC fonts
 - Real installed-font metrics for line wrapping, including Korean text and merge tokens
 - CSV merge tokens using `{{Column}}` and serial tokens using `{{serial}}`
@@ -108,6 +96,8 @@ swift test
 scripts/build_app.sh     # universal (arm64 + x86_64) dist/iLabel Studio.app
 scripts/package_dmg.sh   # wraps it in dist/iLabel-Studio-macOS.dmg
 ```
+
+The walkthrough GIF above is rendered from the real `ContentView` offscreen by `scripts/capture_readme_demo.sh`, so it can be regenerated after a UI change without recording the screen.
 
 ### Windows and Linux
 
