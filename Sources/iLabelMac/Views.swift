@@ -464,8 +464,8 @@ struct SidebarView: View {
                             columns: [GridItem(.flexible()), GridItem(.flexible())],
                             spacing: 6
                         ) {
-                            CompactStepperField(title: "Columns", value: sheetBinding(\.columns), range: 1...12)
-                            CompactStepperField(title: "Rows", value: sheetBinding(\.rows), range: 1...20)
+                            CompactStepperField(title: "Columns", value: sheetBinding(\.columns), range: 1...50)
+                            CompactStepperField(title: "Rows", value: sheetBinding(\.rows), range: 1...100)
                         }
 
                         DimensionGrid(
